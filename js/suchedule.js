@@ -249,6 +249,8 @@ const courseEntry = (() => {
 
         saveSchedule();
 
+        sectionEntry.filterByConflicts();
+
         return this;
     };
 
@@ -264,6 +266,8 @@ const courseEntry = (() => {
         this.updateSelectionsOnSchedule();
 
         saveSchedule();
+
+        sectionEntry.filterByConflicts();
 
         return this;
     };
@@ -392,6 +396,10 @@ const sectionEntry = (() => {
         return this.getName().split(' ', 2).shift();
     };
 
+    sectionEntry.prototype.getCourseCodeWithoutSpace = function () {
+        return this.getName().replace(/([A-Z]+)(\d+).*/, '$1$2');
+    };
+
     sectionEntry.prototype.isSelected = function () {
         return this.getElement().hasClass('selected');
     };
@@ -504,6 +512,89 @@ const sectionEntry = (() => {
             'day'
         );
     };
+
+    //  Maps every schedule cell that holds a course to the set of course codes sitting in it.
+    //  Keys are `${row}-${column}` of #schedule, matching the arithmetic of getClassCells.
+    sectionEntry.getOccupiedSlots = () => {
+        const slots = {};
+
+        $('.cell-course').each((i, element) => {
+            const $cell = $(element).parent();
+            const key = `${$cell.parent().index()}-${$cell.index()}`;
+            const code = cellCourses($(element)).getCourseCodeWithoutSpace();
+
+            (slots[key] = slots[key] || {})[code] = 1;
+        });
+
+        return slots;
+    };
+
+    sectionEntry.filterByConflicts = (() => {
+        const apply = () => {
+            if (!$('#conflict-filter-toggle').is(':checked')) {
+                sectionEntry.clearFilter('conflict');
+
+                return;
+            }
+
+            const occupiedSlots = sectionEntry.getOccupiedSlots();
+
+            sectionEntry.filter(
+                section => {
+                    //  A selected section always stays visible, otherwise it could not be removed anymore.
+                    if (section.isSelected()) {
+                        return true;
+                    }
+
+                    const courseCode = section.getCourseCodeWithoutSpace();
+
+                    for (const sectionDay of section.getElement().find('.section-day')) {
+                        const day = Number($(sectionDay).data('day'));
+                        const start = Number($(sectionDay).data('start'));
+                        const duration = Number($(sectionDay).data('duration'));
+
+                        //  TBA hours cannot conflict with anything
+                        if (start === -1) {
+                            continue;
+                        }
+
+                        for (let hour = start; hour < start + duration; hour++) {
+                            const codes = occupiedSlots[`${hour + 1}-${day + 1}`];
+
+                            if (codes === undefined) {
+                                continue;
+                            }
+
+                            //  Hours taken by the section's own course are not a conflict.
+                            for (const occupyingCode of Object.keys(codes)) {
+                                if (occupyingCode !== courseCode) {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+
+                    return true;
+                },
+                'conflict'
+            );
+        };
+
+        //  Adding a saved schedule fires one call per course, so consecutive calls are merged into one pass.
+        let scheduledRun = null;
+
+        return () => {
+            if (scheduledRun !== null) {
+                return;
+            }
+
+            scheduledRun = setTimeout(() => {
+                scheduledRun = null;
+
+                apply();
+            }, 0);
+        };
+    })();
 
     return sectionEntry;
 })();
@@ -835,6 +926,20 @@ const normalizeSearchParam = (query) => {
     }
 })();
 
+(setConflictFilterEvents = () => {
+    const storageKey = 'hide-conflicting-courses';
+
+    //  The state has to be restored before the saved schedule is loaded, otherwise
+    //  the courses added on load would be filtered against a toggle that looks off.
+    $('#conflict-filter-toggle').prop('checked', localStorage.getItem(storageKey) === 'yes');
+
+    $(document).on('input', '#conflict-filter-toggle', event => {
+        localStorage.setItem(storageKey, $(event.currentTarget).is(':checked') ? 'yes' : 'no');
+
+        sectionEntry.filterByConflicts();
+    });
+})();
+
 (loadScheduleFromLocalStorage = () => {
     const savedSchedule = localStorage.getItem('saved-schedule');
 
@@ -859,6 +964,8 @@ const normalizeSearchParam = (query) => {
         colorPalette.reset();
 
         saveSchedule();
+
+        sectionEntry.filterByConflicts();
     });
 })();
 
