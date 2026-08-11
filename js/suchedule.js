@@ -176,6 +176,18 @@ const courseEntry = (() => {
         return this.getElement().find('.course-name').text();
     };
 
+    //  Only the first 3 digits carry the level: special topic courses are numbered
+    //  with 4 or 5 digits (CS 48012, EE 4801), so the raw number would misclassify them.
+    courseEntry.prototype.getCourseLevel = function () {
+        const number = this.getCodeWithSpace().replace(/^[A-Z]+\s*(\d+).*$/, '$1');
+
+        return Number(number.slice(0, 3));
+    };
+
+    courseEntry.prototype.isGraduate = function () {
+        return this.getCourseLevel() >= 500;
+    };
+
     courseEntry.prototype.showSelectionsOnSchedule = function () {
         this.getSections('.course-section.selected').forEach(section => {
             section.getClassCells().getElements().addClass('selection');
@@ -328,6 +340,21 @@ const courseEntry = (() => {
         );
     };
 
+    courseEntry.filterByLevel = () => {
+        const mode = $('input[name=level-filter]:checked').val();
+
+        if (mode === 'all') {
+            courseEntry.clearFilter('level');
+
+            return;
+        }
+
+        courseEntry.filter(
+            course => course.isGraduate() === (mode === 'grad'),
+            'level'
+        );
+    };
+
     courseEntry.startDisplayMode = code => {
         courseEntry(code).open().getElement().addClass('display-alone');
 
@@ -352,6 +379,10 @@ const courseEntry = (() => {
         courses.forEach(course => {
             $list.append(templateGenerator.makeCourseEntry(course, instructors, places));
         });
+
+        //  Covers the first visit, where the list arrives asynchronously from $.getJSON
+        //  and therefore misses the pass done by setLevelFilterEvents.
+        courseEntry.filterByLevel();
     };
 
     return courseEntry;
@@ -804,6 +835,22 @@ const classCells = (() => {
 
         localStorage.setItem(storageKey, JSON.stringify(data));
     });
+})();
+
+(setLevelFilterEvents = () => {
+    const storageKey = 'level-filter';
+    const mode = localStorage.getItem(storageKey) || 'all';
+
+    $(`input[name=level-filter][value="${mode}"]`).prop('checked', true);
+
+    $(document).on('change', 'input[name=level-filter]', event => {
+        localStorage.setItem(storageKey, $(event.currentTarget).val());
+
+        courseEntry.filterByLevel();
+    });
+
+    //  Covers the repeat visit, where updateCourseData has already populated the list synchronously.
+    courseEntry.filterByLevel();
 })();
 
 const normalizeSearchParam = (query) => {

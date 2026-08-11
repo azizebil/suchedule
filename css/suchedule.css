@@ -189,6 +189,55 @@ input[id*=day-filter-]:checked + label {
     box-shadow: inset 0 -30px #4183c4;
 }
 
+#level-filter {
+    display: flex;
+    align-items: center;
+    color: white;
+}
+
+#level-filter-selections {
+    display: flex;
+    justify-content: flex-end;
+}
+
+#level-filter-label {
+    flex: 1;
+    user-select: none;
+}
+#level-filter-label::after {
+    content: "Course Level";
+}
+@media only screen and (max-width: 440px) {
+    #level-filter-label::after {
+        content: "Level";
+    }
+}
+@media only screen and (max-width: 366px) {
+    #level-filter-label::after {
+        content: "";
+    }
+}
+
+input[name=level-filter] {
+    display: none;
+}
+
+input[name=level-filter] + label {
+    padding: 0.4rem;
+    cursor: pointer;
+    user-select: none;
+    font-family: monospace;
+    text-transform: uppercase;
+    box-shadow: inset 0 -3px #4183c4;
+    transition: 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+input[name=level-filter] + label:not(:first-of-type) {
+    margin-left: 0.6rem;
+}
+input[name=level-filter]:checked + label {
+    box-shadow: inset 0 -30px #4183c4;
+}
+
 #conflict-filter {
     display: flex;
     align-items: center;
