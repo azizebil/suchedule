@@ -1,0 +1,11 @@
+{
+  "name": "suchedule",
+  "private": true,
+  "scripts": {
+    "build": "terser js/suchedule.js -c -m -o js/suchedule.min.js && cleancss css/suchedule.css -o css/suchedule.min.css"
+  },
+  "devDependencies": {
+    "clean-css-cli": "^5.6.3",
+    "terser": "^5.31.0"
+  }
+}
