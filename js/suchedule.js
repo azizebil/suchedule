@@ -75,9 +75,24 @@ const templateGenerator = (() => {
         </div>
     `;
 
+    //  Plan names are user typed, so they go through the DOM rather than into the markup.
+    const escapeHtml = text => $('<div>').text(text).html();
+
+    const makeScenarioTab = (plan, index, isActive, isNew) => `
+        <div class="scenario-tab${isActive ? ' active' : ''}${isNew ? ' entering' : ''}"
+            data-scenario="${index}" draggable="true">
+            <span class="scenario-tab-name" title="Double click to rename">${escapeHtml(plan.name)}</span>
+            <span class="scenario-tab-close" title="Close this plan">&times;</span>
+        </div>
+    `;
+
+    const makeScenarioAddButton = () => `<div id="scenario-add" title="New plan">+</div>`;
+
     return {
         makeCourseEntry,
-        makeCellCourse
+        makeCellCourse,
+        makeScenarioTab,
+        makeScenarioAddButton
     };
 })();
 
@@ -113,8 +128,261 @@ const colorPalette = (() => {
     };
 })();
 
+const scenarios = (() => {
+    const MAX = 5;
+    const LETTERS = 'ABCDE';
+
+    //  The key has to contain 'saved-schedule': clearOldData in updateCourseData wipes
+    //  every key matching that substring when the course data changes, which is what
+    //  keeps stale crns out of the saved plans.
+    const storageKey = 'saved-schedules';
+
+    let plans = [];
+    let pendingClose = null;
+
+    const write = () => localStorage.setItem(storageKey, JSON.stringify(plans));
+
+    const count = () => plans.length;
+
+    const nextName = () => {
+        for (const letter of LETTERS) {
+            if (!plans.some(plan => plan.name === `Plan ${letter}`)) {
+                return `Plan ${letter}`;
+            }
+        }
+
+        return `Plan ${plans.length + 1}`;
+    };
+
+    const getActiveIndex = () => {
+        const stored = Number(localStorage.getItem('active-scenario')) || 0;
+
+        return stored >= 0 && stored < plans.length ? stored : 0;
+    };
+
+    const getName = index => plans[index].name;
+
+    const getActiveName = () => getName(getActiveIndex());
+
+    const crnCount = index => {
+        const crns = plans[index].crns;
+
+        return crns === '' ? 0 : crns.split(',').length;
+    };
+
+    const saveActive = crns => {
+        plans[getActiveIndex()].crns = crns;
+
+        write();
+    };
+
+    //  Only called when the plan list itself changes. Switching tabs merely moves the
+    //  active class, so the elements keep their identity and dblclick-to-rename survives.
+    //  enteringIndex marks the one tab that should play its entry animation.
+    const renderTabs = (enteringIndex = -1) => {
+        const activeIndex = getActiveIndex();
+
+        $('#scenario-tabs')
+            .toggleClass('single-plan', plans.length === 1)
+            .html(
+                plans.map((plan, index) =>
+                    templateGenerator.makeScenarioTab(plan, index, index === activeIndex, index === enteringIndex))
+                    .join('') + (plans.length < MAX ? templateGenerator.makeScenarioAddButton() : '')
+            );
+    };
+
+    const markActiveTab = () => {
+        $('.scenario-tab').removeClass('active')
+            .filter(`[data-scenario="${getActiveIndex()}"]`).addClass('active');
+    };
+
+    //  Deliberately does not save: switching tabs resets the table before loading the
+    //  target plan, and saving in between would overwrite that plan with an empty one.
+    const clearScheduleDom = () => {
+        $('.course-section.selected').removeClass('selected');
+        $('.class-cell').attr('class', 'class-cell').children().remove();
+
+        colorPalette.reset();
+    };
+
+    const load = index => {
+        if (plans[index].crns === '') {
+            return;
+        }
+
+        plans[index].crns.split(',').forEach(crn => {
+            $(`.course-section[data-crn="${crn}"]`).click();
+        });
+    };
+
+    const switchTo = index => {
+        //  Set first: the clicks below run through addToSchedule, which saves to the active plan.
+        localStorage.setItem('active-scenario', index);
+
+        markActiveTab();
+
+        if (courseEntry.isOnDisplayMode()) {
+            courseEntry.endDisplayMode();
+        }
+
+        clearScheduleDom();
+
+        load(index);
+
+        //  Switching to an empty plan produces no clicks at all, so the conflict filter
+        //  would keep hiding sections based on the plan we just left.
+        sectionEntry.filterByConflicts();
+    };
+
+    const add = (crns = '') => {
+        if (plans.length >= MAX) {
+            return getActiveIndex();
+        }
+
+        plans.push({name: nextName(), crns});
+
+        write();
+        renderTabs(plans.length - 1);
+
+        switchTo(plans.length - 1);
+
+        return plans.length - 1;
+    };
+
+    //  The tab plays its exit animation before the list actually changes, so the
+    //  remaining tabs only reflow once, after it is gone.
+    const close = index => {
+        const $tab = $(`.scenario-tab[data-scenario="${index}"]`);
+
+        if (plans.length <= 1 || $tab.hasClass('leaving')) {
+            return;
+        }
+
+        const remove = () => {
+            const activeIndex = getActiveIndex();
+
+            plans.splice(index, 1);
+
+            write();
+            renderTabs();
+
+            switchTo(index < activeIndex ? activeIndex - 1 : Math.min(activeIndex, plans.length - 1));
+        };
+
+        if ($tab.length === 0) {
+            remove();
+
+            return;
+        }
+
+        $tab.addClass('leaving');
+
+        setTimeout(remove, 160);
+    };
+
+    const move = (from, to) => {
+        if (from === to || plans[from] === undefined || plans[to] === undefined) {
+            return;
+        }
+
+        //  Tracked by identity so the same plan stays active wherever it lands.
+        const activePlan = plans[getActiveIndex()];
+
+        plans.splice(to, 0, plans.splice(from, 1).shift());
+
+        localStorage.setItem('active-scenario', plans.indexOf(activePlan));
+
+        write();
+        renderTabs();
+    };
+
+    const requestClose = index => {
+        if (plans.length <= 1) {
+            return;
+        }
+
+        if (crnCount(index) === 0) {
+            close(index);
+
+            return;
+        }
+
+        pendingClose = index;
+
+        $('#notify-close-plan .notification-content p').text(
+            `${getName(index)} has ${crnCount(index)} course${crnCount(index) === 1 ? '' : 's'} in it.` +
+            ` Closing it cannot be undone.`
+        );
+
+        $('#notify-close-plan').fadeIn(500);
+    };
+
+    const confirmClose = () => {
+        if (pendingClose === null) {
+            return;
+        }
+
+        close(pendingClose);
+
+        pendingClose = null;
+    };
+
+    const rename = (index, name) => {
+        plans[index].name = name.replace(/\s+/g, ' ').trim().slice(0, 24) || nextName();
+
+        write();
+        renderTabs();
+    };
+
+    const replaceActive = crns => {
+        plans[getActiveIndex()].crns = crns;
+
+        write();
+
+        switchTo(getActiveIndex());
+    };
+
+    //  Runs at definition time so the plan list is ready for anything that reads it
+    //  before the DOM work starts - shareLink.offerImport in particular.
+    (migrate = () => {
+        try {
+            plans = JSON.parse(localStorage.getItem(storageKey)) || [];
+        } catch (error) {
+            plans = [];
+        }
+
+        plans = (Array.isArray(plans) ? plans : [])
+            .filter(plan => plan !== null && typeof plan === 'object' && typeof plan.crns === 'string')
+            .map(plan => ({name: String(plan.name || ''), crns: plan.crns}));
+
+        if (plans.length === 0) {
+            //  Older layouts: three fixed plans, and before those a single schedule.
+            plans = ['saved-schedule-0', 'saved-schedule-1', 'saved-schedule-2', 'saved-schedule']
+                .map(key => localStorage.getItem(key))
+                .filter(crns => crns !== null && crns !== '')
+                .map((crns, index) => ({name: `Plan ${LETTERS[index]}`, crns}));
+        }
+
+        if (plans.length === 0) {
+            plans = [{name: `Plan ${LETTERS[0]}`, crns: ''}];
+        }
+
+        plans = plans.slice(0, MAX);
+
+        ['saved-schedule', 'saved-schedule-0', 'saved-schedule-1', 'saved-schedule-2']
+            .forEach(key => localStorage.removeItem(key));
+
+        write();
+    })();
+
+    return {
+        MAX, count, nextName, getActiveIndex, getName, getActiveName, crnCount, saveActive,
+        clearScheduleDom, renderTabs, switchTo, add, requestClose, confirmClose, rename, replaceActive, move
+    };
+})();
+
 const saveSchedule = () => {
-    localStorage.setItem('saved-schedule', cellCourses.getAllCrnDataToSave().join(','));
+    scenarios.saveActive(cellCourses.getAllCrnDataToSave().join(','));
 };
 
 const courseEntry = (() => {
@@ -383,6 +651,8 @@ const courseEntry = (() => {
         //  Covers the first visit, where the list arrives asynchronously from $.getJSON
         //  and therefore misses the pass done by setLevelFilterEvents.
         courseEntry.filterByLevel();
+
+        shareLink.offerImport();
     };
 
     return courseEntry;
@@ -777,6 +1047,107 @@ const classCells = (() => {
     return classCells;
 })();
 
+const shareLink = (() => {
+    const make = () => {
+        const crns = cellCourses.getAllCrnDataToSave();
+
+        return `${location.origin}${location.pathname}#term=${config.term}&crns=${crns.join(',')}`;
+    };
+
+    const parse = () => {
+        const crnsMatch = location.hash.match(/crns=([\d,]+)/);
+        const termMatch = location.hash.match(/term=(\d+)/);
+
+        if (crnsMatch === null) {
+            return null;
+        }
+
+        return {
+            term: termMatch === null ? null : termMatch[1],
+            //  A repeated crn would click the same section twice and toggle it back off.
+            crns: [...new Set(crnsMatch[1].split(',').filter(crn => crn.length > 0))]
+        };
+    };
+
+    //  A shared schedule gets its own plan, so nothing the visitor built is touched.
+    //  Only when every plan slot is taken does it fall back to replacing the active one.
+    const resolveTarget = () => {
+        if (scenarios.count() < scenarios.MAX) {
+            return {isNew: true, name: scenarios.nextName()};
+        }
+
+        const index = scenarios.getActiveIndex();
+
+        return {isNew: false, name: scenarios.getName(index), courses: scenarios.crnCount(index)};
+    };
+
+    const notify = (id, text) => {
+        $(`#${id} .notification-content p`).text(text);
+
+        $(`#${id}`).fadeIn(500);
+    };
+
+    let pending = null;
+
+    //  Called from courseEntry.populate, which is the one point both the synchronous and
+    //  the $.getJSON path go through. Anywhere else and a first-time visitor - which is
+    //  exactly who opens a shared link - would find no .course-section to match against.
+    const offerImport = () => {
+        const shared = parse();
+
+        if (shared === null) {
+            return;
+        }
+
+        if (shared.term !== null && shared.term !== config.term) {
+            notify('notify-share-invalid',
+                `This link is for term ${shared.term}, but the current term is ${config.term}. ` +
+                `Ask for a fresh link.`);
+
+            return;
+        }
+
+        const found = shared.crns.filter(crn => $(`.course-section[data-crn="${crn}"]`).length > 0);
+        const missing = shared.crns.length - found.length;
+
+        if (found.length === 0) {
+            notify('notify-share-invalid',
+                `None of the ${shared.crns.length} courses in this link exist in term ${config.term}.`);
+
+            return;
+        }
+
+        const target = resolveTarget();
+
+        pending = found;
+
+        notify('notify-share-import',
+            `Someone shared a schedule of ${found.length} course${found.length === 1 ? '' : 's'} with you.` +
+            `${missing > 0 ? ` ${missing} of them could not be found in this term.` : ''}` +
+            (target.isNew
+                ? ` Load it into a new plan (${target.name})?`
+                : ` All ${scenarios.MAX} plans are in use, so this will replace ${target.name}` +
+                  ` (${target.courses} course${target.courses === 1 ? '' : 's'}). Load it anyway?`));
+    };
+
+    const acceptImport = () => {
+        if (pending === null) {
+            return;
+        }
+
+        //  Resolved again rather than reused: the visitor may have added or closed a plan
+        //  while the confirmation was sitting on screen.
+        resolveTarget().isNew ? scenarios.add(pending.join(',')) : scenarios.replaceActive(pending.join(','));
+
+        pending = null;
+
+        //  Without this the confirmation comes back on every reload and fights the user's own edits.
+        history.replaceState(null, '', location.pathname);
+    };
+
+    return {make, parse, offerImport, acceptImport};
+})();
+
 (showFirstVisitNotifications = () => {
     if (localStorage.getItem('visited-before') === null) {
         localStorage.setItem('visited-before', 'yes');
@@ -861,6 +1232,8 @@ const normalizeSearchParam = (query) => {
 };
 
 (setEvents = () => {
+    let draggedIndex = null;
+
     $(document).on('click', '.course-header', event => {
         courseEntry($(event.currentTarget).parent()).toggleOpen();
 
@@ -941,6 +1314,22 @@ const normalizeSearchParam = (query) => {
 
     $('#menu-toggle').on('click', () => $('body').toggleClass('hide-menu'));
 
+    //  Pasting a share link while already on the site only changes the hash, so the page
+    //  never reloads and populate never runs again.
+    $(window).on('hashchange', () => shareLink.offerImport());
+
+    //  Bound straight to the element on purpose: ClipboardJS delegates from document.body,
+    //  so stopping propagation here is what keeps an empty schedule from being copied.
+    $('#share-button').on('click', event => {
+        if (cellCourses.getAllCrnDataToSave().length > 0) {
+            return;
+        }
+
+        event.stopPropagation();
+
+        $('#notify-share-empty').fadeIn(500);
+    });
+
     $(document).on('keyup', (() => {
         const ESC_KEY = 27;
 
@@ -955,7 +1344,105 @@ const normalizeSearchParam = (query) => {
         };
     })());
 
-    $(document).on('click', '#clear-button', () => $('#notify-clear').fadeIn(500));
+    //  Skipping the already active tab is what lets dblclick-to-rename work: re-running
+    //  switchTo on every click would be harmless, but a second click must not race the rename.
+    $(document).on('click', '.scenario-tab', event => {
+        const index = Number($(event.currentTarget).data('scenario'));
+
+        if (index !== scenarios.getActiveIndex()) {
+            scenarios.switchTo(index);
+        }
+    });
+
+    $(document).on('click', '#scenario-add', () => scenarios.add());
+
+    $(document).on('click', '.scenario-tab-close', event => {
+        event.stopPropagation();
+
+        scenarios.requestClose(Number($(event.currentTarget).closest('.scenario-tab').data('scenario')));
+    });
+
+    $(document).on('dblclick', '.scenario-tab-name', event => {
+        //  Dragging inside a contenteditable has to select text, not reorder the tab.
+        $(event.currentTarget).closest('.scenario-tab').attr('draggable', 'false');
+
+        $(event.currentTarget).attr('contenteditable', 'true').focus();
+
+        document.execCommand('selectAll', false, null);
+    });
+
+    $(document).on('dragstart', '.scenario-tab', event => {
+        draggedIndex = Number($(event.currentTarget).data('scenario'));
+
+        //  Firefox refuses to start a drag unless some data is set.
+        event.originalEvent.dataTransfer.setData('text/plain', String(draggedIndex));
+        event.originalEvent.dataTransfer.effectAllowed = 'move';
+
+        $(event.currentTarget).addClass('dragging');
+    });
+
+    $(document).on('dragover', '.scenario-tab', event => {
+        if (draggedIndex === null) {
+            return;
+        }
+
+        event.preventDefault();
+
+        event.originalEvent.dataTransfer.dropEffect = 'move';
+
+        const index = Number($(event.currentTarget).data('scenario'));
+
+        $('.scenario-tab').removeClass('drop-before drop-after');
+
+        if (index !== draggedIndex) {
+            $(event.currentTarget).addClass(index < draggedIndex ? 'drop-before' : 'drop-after');
+        }
+    });
+
+    $(document).on('drop', '.scenario-tab', event => {
+        event.preventDefault();
+
+        if (draggedIndex !== null) {
+            scenarios.move(draggedIndex, Number($(event.currentTarget).data('scenario')));
+        }
+    });
+
+    $(document).on('dragend', '.scenario-tab', () => {
+        draggedIndex = null;
+
+        $('.scenario-tab').removeClass('dragging drop-before drop-after');
+    });
+
+    $(document).on('blur', '.scenario-tab-name[contenteditable]', event => {
+        const $name = $(event.currentTarget);
+
+        $name.removeAttr('contenteditable');
+
+        scenarios.rename(Number($name.closest('.scenario-tab').data('scenario')), $name.text());
+    });
+
+    $(document).on('keydown', '.scenario-tab-name[contenteditable]', event => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+
+            $(event.currentTarget).blur();
+        }
+
+        if (event.key === 'Escape') {
+            //  Drop the attribute first so the blur handler above no longer matches and
+            //  the half typed name is discarded instead of saved.
+            $(event.currentTarget).removeAttr('contenteditable');
+
+            scenarios.renderTabs();
+        }
+    });
+
+    $(document).on('click', '#clear-button', () => {
+        $('#notify-clear .notification-content p')
+            .text(`Are you sure you want to clear ${scenarios.getActiveName()}?`);
+
+        $('#notify-clear').fadeIn(500);
+    });
 
     $(document).on('click', '#about-button', () => $('#notify-about').fadeIn(500));
     $(document).on('click', '#about-button', () => $('#notify-cookies').fadeIn(500));
@@ -988,15 +1475,9 @@ const normalizeSearchParam = (query) => {
 })();
 
 (loadScheduleFromLocalStorage = () => {
-    const savedSchedule = localStorage.getItem('saved-schedule');
+    scenarios.renderTabs();
 
-    if (savedSchedule === null) {
-        return;
-    }
-
-    savedSchedule.split(',').forEach(crn => {
-        $(`.course-section[data-crn="${crn}"]`).click();
-    });
+    scenarios.switchTo(scenarios.getActiveIndex());
 })();
 
 (setNotificationEvents = () => {
@@ -1004,11 +1485,16 @@ const normalizeSearchParam = (query) => {
         $(event.target).closest('.notification').fadeOut(500);
     });
 
-    $(document).on('click', '#notify-clear .notification-button', () => {
-        $('.course-section.selected').removeClass('selected');
-        $('.class-cell').attr('class', 'class-cell').children().remove();
+    $(document).on('click', '#notify-share-import .notification-button', () => {
+        shareLink.acceptImport();
+    });
 
-        colorPalette.reset();
+    $(document).on('click', '#notify-close-plan .notification-button', () => {
+        scenarios.confirmClose();
+    });
+
+    $(document).on('click', '#notify-clear .notification-button', () => {
+        scenarios.clearScheduleDom();
 
         saveSchedule();
 
@@ -1032,6 +1518,28 @@ const normalizeSearchParam = (query) => {
     });
 
     clipboard.on('error', event => {
+        const notification = $('#notify-copy-fail');
+
+        notification.find('.notification-content p').text(event.text);
+
+        notification.fadeIn(500);
+    });
+
+    const shareClipboard = new ClipboardJS('#share-button', {
+        text: () => shareLink.make()
+    });
+
+    shareClipboard.on('success', () => {
+        const notification = $('#notify-share-copied');
+
+        notification.fadeIn(500);
+
+        setTimeout(() => {
+            notification.fadeOut(500);
+        }, 3000);
+    });
+
+    shareClipboard.on('error', event => {
         const notification = $('#notify-copy-fail');
 
         notification.find('.notification-content p').text(event.text);
