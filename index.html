@@ -9,9 +9,9 @@
     <meta name="description" content="This website allows Sabancı University students to create their schedule with a
     friendly user interface."/>
     <meta name="keywords" content="Schedule, Sabancı Universitesi, Sabanci University, Suchedule"/>
-    <meta name="author" content="Adnan Burak Ayaz"/>
-    <meta name="owner" content="Adnan Burak Ayaz"/>
-    <meta name="copyright" content="(c) 2018"/>
+    <meta name="author" content="Aziz Derin Ebil"/>
+    <meta name="owner" content="Aziz Derin Ebil"/>
+    <meta name="copyright" content="(c) 2018 Adnan Burak Ayaz, MIT License"/>
     <meta property="og:site_name" content="SUchedule">
     <meta property="og:title" content="SUchedule" />
     <meta property="og:description" content="This website allows Sabancı University students to create their schedule
@@ -26,7 +26,6 @@
     <link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
     <link rel="icon" href="favicon.ico" type="image/x-icon"/>
     <link rel="shortcut icon" href="favicon.ico" type="image/x-icon"/>
-    <script src="https://kit.fontawesome.com/6fdf0c8f62.js" crossorigin="anonymous"></script>
 </head>
 
 <body>
@@ -35,6 +34,7 @@
     <div id="about-button" class="icon-help button"></div>
     <div id="clear-button" class="icon-trash button">Clear</div>
     <div id="copy-button" class="icon-clipboard button">Copy Crn</div>
+    <div id="share-button" class="icon-link-ext-alt button">Share</div>
 </header>
 <div id="menu">
     <div id="menu-toggle" class="icon-menu button"></div>
@@ -81,6 +81,7 @@
     <div id="course-list" class="menu-item loading"></div>
 </div>
 <div id="main-content">
+    <div id="scenario-tabs"></div>
     <table id="schedule">
         <tr>
             <th>-</th>
@@ -187,19 +188,17 @@
             <div class="icon-cancel shake-on-hover button"></div>
         </div>
         <div class="notification-content">
-            <p>I am Burak, a CS student at Sabancı University. I've built this project with the hopes of making
-                the course registration period easier for SU students.</p>
+            <p>This is a fork of SUchedule, originally created by Adnan Burak Ayaz to make the course
+                registration period easier for Sabancı University students. It is MIT licensed.</p>
+            <p>Original project:</p>
+            <p><a class="market-link" href="https://github.com/aburakayaz/suchedule" target="_blank"
+                  rel="noopener">github.com/aburakayaz/suchedule</a></p>
+            <p>This fork, maintained by Aziz Derin Ebil, adds a conflict filter, an undergraduate/graduate
+                filter, multiple schedule plans and shareable schedule links:</p>
+            <p><a class="market-link" href="https://github.com/azizebil/suchedule" target="_blank"
+                  rel="noopener">github.com/azizebil/suchedule</a></p>
             <p>Feel free to contact me about your suggestions:</p>
-            <p>bayaz@sabanciuniv.edu</p>
-            <p>Support me on GitHub:</p>
-            <iframe style="display:inline-block;"
-                    src="https://ghbtns.com/github-btn.html?user=aburakayaz&type=follow&count=true" frameborder="0"
-                    scrolling="0" width="170px" height="20px"></iframe>
-            <iframe src="https://ghbtns.com/github-btn.html?user=aburakayaz&repo=suchedule&type=star&count=true"
-                    frameborder="0" scrolling="0" width="170px" height="20px"></iframe>
-            <iframe style="display:inline-block;"
-                    src="https://ghbtns.com/github-btn.html?user=aburakayaz&repo=suchedule&type=watch&count=true&v=2"
-                    frameborder="0" scrolling="0" width="170px" height="20px"></iframe>
+            <p>aziz.ebil@sabanciuniv.edu</p>
         </div>
         <div class="notification-button button">Thank You!</div>
     </div>
@@ -221,8 +220,8 @@
             <p> SUchedule Mobile App has been released. You can download the SUchedule 
                 Mobile App, which has new features such as offline mode, from the App Store 
                 and Google Play Store.</p>
-                <div class="market"><a class="market-link" href="https://play.google.com/store/apps/details?id=com.suchedule"><i class="fab fa-google-play"></i>   Google Play Store</a></div>
-                <div class="market"><a class="market-link" href="https://apps.apple.com/tr/app/suchedule/id1587334993"><i class="fab fa-app-store"></i>   App Store</a></div>
+                <div class="market"><a class="market-link" href="https://play.google.com/store/apps/details?id=com.suchedule">Google Play Store</a></div>
+                <div class="market"><a class="market-link" href="https://apps.apple.com/tr/app/suchedule/id1587334993">App Store</a></div>
         </div>
         <div class="notification-button button">I Understand</div>
     </div>
@@ -254,6 +253,55 @@
             <p></p>
         </div>
         <div class="notification-button button">Ok, I've done it myself.</div>
+    </div>
+    <div id="notify-close-plan" class="notification" style="display: none;">
+        <div class="notification-header">
+            <div class="notification-header-text">Close Plan?</div>
+            <div class="icon-cancel shake-on-hover button"></div>
+        </div>
+        <div class="notification-content">
+            <p></p>
+        </div>
+        <div class="notification-button button">Yes, close it</div>
+    </div>
+    <div id="notify-share-copied" class="notification" style="display: none;">
+        <div class="notification-header">
+            <div class="notification-header-text">Link Copied!</div>
+            <div class="icon-cancel shake-on-hover button"></div>
+        </div>
+        <div class="notification-content">
+            <p>Send it to a friend. Opening it will offer them this schedule.</p>
+        </div>
+    </div>
+    <div id="notify-share-empty" class="notification" style="display: none;">
+        <div class="notification-header">
+            <div class="notification-header-text">Nothing to Share</div>
+            <div class="icon-cancel shake-on-hover button"></div>
+        </div>
+        <div class="notification-content">
+            <p>Add some courses to your schedule first.</p>
+        </div>
+        <div class="notification-button button">Alright</div>
+    </div>
+    <div id="notify-share-invalid" class="notification" style="display: none;">
+        <div class="notification-header">
+            <div class="notification-header-text">Link Not Usable</div>
+            <div class="icon-cancel shake-on-hover button"></div>
+        </div>
+        <div class="notification-content">
+            <p></p>
+        </div>
+        <div class="notification-button button">Ok</div>
+    </div>
+    <div id="notify-share-import" class="notification" style="display: none;">
+        <div class="notification-header">
+            <div class="notification-header-text">Shared Schedule</div>
+            <div class="icon-cancel shake-on-hover button"></div>
+        </div>
+        <div class="notification-content">
+            <p></p>
+        </div>
+        <div class="notification-button button">Load It</div>
     </div>
     <div id="notify-data-updated" class="notification" style="display: none;">
         <div class="notification-header">
@@ -304,19 +352,5 @@
 <script src="js/jquery.modal.min.js"></script>
 <script src="js/clipboard.min.js"></script>
 <script src="js/suchedule.min.js"></script>
-<script src="https://apis.google.com/js/api.js"></script>
-<!-- Global site tag (gtag.js) - Google Analytics -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=UA-113204083-2"></script>
-<script>
-    window.dataLayer = window.dataLayer || [];
-
-    function gtag() {
-        dataLayer.push(arguments);
-    }
-
-    gtag('js', new Date());
-
-    gtag('config', 'UA-113204083-2');
-</script>
 </body>
 </html>

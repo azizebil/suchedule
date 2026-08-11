@@ -1,6 +1,30 @@
 ## SUchedule
 
+> **This is a fork** of [aburakayaz/suchedule](https://github.com/aburakayaz/suchedule) by Adnan Burak Ayaz,
+> maintained by Aziz Derin Ebil and deployed at <https://azizebil.github.io/suchedule/>.
+> The original project and its MIT license are unchanged; the sections below are from upstream.
+
 This project allows Sabancı University students to create their schedule with a friendly user interface.
+
+## Added in this fork
+
+- **Hide conflicting courses** — a toggle that hides every section clashing with the courses already on your
+  schedule. Your own course never hides itself, so you can still switch sections.
+- **Course level filter** — All / UG / Grad, based on the first three digits of the course number, so special
+  topic codes like `CS 48012` are classified correctly.
+- **Multiple plans** — up to five independent schedules in named tabs. Add with `+`, rename by double
+  clicking, close with `×`, reorder by dragging.
+- **Shareable links** — the Share button copies a `#term=...&crns=...` link. Opening it offers to load that
+  schedule into a new plan, so nothing you already built is overwritten.
+
+## Build
+
+`index.html` loads only the minified bundles, so regenerate them after editing the sources:
+
+```bash
+npm install
+npm run build
+```
 
 ## Motivation
 
