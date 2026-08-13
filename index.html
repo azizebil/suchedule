@@ -35,6 +35,7 @@
     <div id="clear-button" class="icon-trash button">Clear</div>
     <div id="copy-button" class="icon-clipboard button">Copy Crn</div>
     <div id="share-button" class="icon-link-ext-alt button">Share</div>
+    <div id="export-button" class="icon-calendar button">Calendar</div>
 </header>
 <div id="menu">
     <div id="menu-toggle" class="icon-menu button"></div>
@@ -314,38 +315,22 @@
         <div class="notification-button button">Apology Accepted</div>
     </div>
 </div>
-<div id="google-calendar-modal" class="modal">
-    <h3>Add current courses to your Google Calendar</h3>
+<div id="export-modal" class="modal">
+    <h3>Export your schedule to a calendar</h3>
 
-    Notifications:
-    <div id="notification-area">
+    <div id="export-fields">
+        <label for="term-start-date">Monday of the first class week:</label>
+        <input id="term-start-date" type="date">
+
+        <label for="week-count">How many weeks:</label>
+        <input id="week-count" type="number" min="1" max="20" value="14">
     </div>
 
-    <div id="unauthorized-area">
-        <button id="authorize-button" class="icon-link-ext-alt modal-button">Sign-in</button>
-    </div>
+    <button id="download-ics-button" class="icon-calendar modal-button">Download .ics</button>
 
-    <div id="authorized-area">
-        <div id="current-google-calendar">
-            <div id="calendar-add-area">
-                <label for="current-week">
-                    Current week of the Semester:
-                    <input id="current-week" type="number" max="14" min="1" value="1"/>
-                </label>
+    <div id="export-message"></div>
 
-                <button id="add-button" class="icon-ok modal-button">Add Calendar</button>
-            </div>
-
-            <div id="calendar-delete-area">
-                <span>You already have a calendar for this term named:</span>
-                <p id="current-calendar-name"></p>
-
-                <button id="delete-button" class="icon-trash modal-button">Delete Calendar</button>
-            </div>
-        </div>
-
-        <button id="signout-button" class="icon-cancel modal-button">Sign Out</button>
-    </div>
+    <p id="export-note">Times follow the course schedule grid, so they can be off by a few minutes.</p>
 </div>
 
 <script src="js/jquery-3.3.1.min.js"></script>

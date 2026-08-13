@@ -731,7 +731,8 @@ const sectionEntry = (() => {
         return this.getElement().find('.section-day').map((i, el) => ({
             day: $(el).data('day'),
             start: $(el).data('start'),
-            duration: $(el).data('duration')
+            duration: $(el).data('duration'),
+            place: $(el).data('place')
         })).toArray();
     };
 
@@ -1047,6 +1048,208 @@ const classCells = (() => {
     return classCells;
 })();
 
+const icsExport = (() => {
+    //  Turkey has been on a fixed UTC+3 since 2016, so the zone needs a single rule.
+    const timeZone = [
+        'BEGIN:VTIMEZONE',
+        'TZID:Europe/Istanbul',
+        'BEGIN:STANDARD',
+        'DTSTART:19700101T000000',
+        'TZOFFSETFROM:+0300',
+        'TZOFFSETTO:+0300',
+        'TZNAME:+03',
+        'END:STANDARD',
+        'END:VTIMEZONE'
+    ];
+
+    //  Backslash first, otherwise the escapes we add below get escaped again.
+    const escapeText = text => String(text)
+        .replace(/\\/g, '\\\\')
+        .replace(/;/g, '\\;')
+        .replace(/,/g, '\\,')
+        .replace(/\r?\n/g, '\\n');
+
+    //  RFC 5545 counts octets, not characters: a Turkish letter is two bytes in UTF-8,
+    //  so folding by character length would still emit over-long lines.
+    const foldLine = (() => {
+        const encoder = new TextEncoder();
+
+        return line => {
+            const pieces = [];
+
+            let piece = '';
+            let octets = 0;
+            let limit = 75;
+
+            for (const character of line) {
+                const size = encoder.encode(character).length;
+
+                if (octets + size > limit) {
+                    pieces.push(piece);
+
+                    piece = '';
+                    octets = 0;
+                    //  Continuation lines spend one of their 75 octets on the leading space.
+                    limit = 74;
+                }
+
+                piece += character;
+                octets += size;
+            }
+
+            pieces.push(piece);
+
+            return pieces.join('\r\n ');
+        };
+    })();
+
+    const pad = number => `${number < 10 ? '0' : ''}${number}`;
+
+    //  All date maths is done in UTC so the browser's own zone can never shift a day.
+    const parseMonday = value => {
+        const [year, month, day] = value.split('-').map(Number);
+        const date = new Date(Date.UTC(year, month - 1, day));
+
+        date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+
+        return date;
+    };
+
+    const formatLocal = (monday, dayCode, hour, minute) => {
+        const date = new Date(monday);
+
+        date.setUTCDate(date.getUTCDate() + dayCode);
+
+        return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}` +
+            `T${pad(hour)}${pad(minute)}00`;
+    };
+
+    const stamp = () => {
+        const now = new Date();
+
+        return `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}` +
+            `T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
+    };
+
+    //  Sourced from courses whose selection is complete rather than from the .cell-course
+    //  elements: a fully TBA section occupies no schedule cell, so reading the table back
+    //  would silently drop those courses instead of reporting them. isSelectionComplete is
+    //  what keeps half-picked courses out, which plain .selected would wrongly include.
+    const collect = () => {
+        const events = [];
+
+        let skipped = 0;
+
+        $('.course-entry').each((i, element) => {
+            const course = courseEntry($(element));
+
+            if (!course.isSelectionComplete()) {
+                return;
+            }
+
+            const title = course.getName().split(' - ').slice(1).join(' - ');
+
+            course.getSections('.course-section.selected').forEach(section => {
+                section.getScheduleData().forEach(schedule => {
+                    if (schedule.start === -1 || schedule.day === 5) {
+                        skipped++;
+
+                        return;
+                    }
+
+                    events.push({
+                        crn: section.getCrn(),
+                        day: schedule.day,
+                        start: schedule.start,
+                        duration: schedule.duration,
+                        place: schedule.place,
+                        summary: `${section.getName()} — ${title}`,
+                        instructor: section.getInstructorName()
+                    });
+                });
+            });
+        });
+
+        return {events, skipped};
+    };
+
+    const build = (events, monday, weeks) => {
+        const lines = [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//SUchedule//SUchedule//EN',
+            'CALSCALE:GREGORIAN',
+            'METHOD:PUBLISH',
+            ...timeZone
+        ];
+
+        const dtstamp = stamp();
+
+        events.forEach(event => {
+            lines.push(
+                'BEGIN:VEVENT',
+                //  Stable per class hour, so re-importing updates instead of duplicating.
+                `UID:${event.crn}-${event.day}-${event.start}@suchedule`,
+                `DTSTAMP:${dtstamp}`,
+                `DTSTART;TZID=Europe/Istanbul:${formatLocal(monday, event.day, event.start + 8, 40)}`,
+                `DTEND;TZID=Europe/Istanbul:${formatLocal(monday, event.day, event.start + 8 + event.duration, 30)}`,
+                `RRULE:FREQ=WEEKLY;COUNT=${weeks}`,
+                `SUMMARY:${escapeText(event.summary)}`,
+                `LOCATION:${escapeText(event.place)}`,
+                `DESCRIPTION:${escapeText(`CRN: ${event.crn}\nInstructor: ${event.instructor}`)}`,
+                'END:VEVENT'
+            );
+        });
+
+        lines.push('END:VCALENDAR');
+
+        //  CRLF is not optional: Outlook rejects a calendar that only uses \n.
+        return `${lines.map(foldLine).join('\r\n')}\r\n`;
+    };
+
+    const download = text => {
+        const url = URL.createObjectURL(new Blob([text], {type: 'text/calendar;charset=utf-8'}));
+        const $link = $('<a>').attr({href: url, download: `suchedule-${config.term}.ics`});
+
+        $('body').append($link);
+
+        $link[0].click();
+        $link.remove();
+
+        URL.revokeObjectURL(url);
+    };
+
+    const message = text => $('#export-message').text(text);
+
+    const run = () => {
+        const startDate = $('#term-start-date').val();
+
+        if (!startDate) {
+            message('Pick the Monday your classes start.');
+
+            return;
+        }
+
+        const weeks = Math.min(Math.max(Number($('#week-count').val()) || 14, 1), 20);
+        const {events, skipped} = collect();
+
+        if (events.length === 0) {
+            message(skipped > 0
+                ? 'Every class hour on your schedule is TBA, so there is nothing to export.'
+                : 'Add some courses to your schedule first.');
+
+            return;
+        }
+
+        download(build(events, parseMonday(startDate), weeks));
+
+        message(`Downloaded ${events.length} event${events.length === 1 ? '' : 's'} over ${weeks} weeks.` +
+            (skipped > 0 ? ` ${skipped} TBA class hour${skipped === 1 ? '' : 's'} left out.` : ''));
+    };
+
+    return {escapeText, foldLine, collect, build, parseMonday, run};
+})();
+
 const shareLink = (() => {
     const make = () => {
         const crns = cellCourses.getAllCrnDataToSave();
@@ -1317,6 +1520,14 @@ const normalizeSearchParam = (query) => {
     //  Pasting a share link while already on the site only changes the hash, so the page
     //  never reloads and populate never runs again.
     $(window).on('hashchange', () => shareLink.offerImport());
+
+    $(document).on('click', '#export-button', () => {
+        $('#export-message').text('');
+
+        $('#export-modal').modal();
+    });
+
+    $(document).on('click', '#download-ics-button', () => icsExport.run());
 
     //  Bound straight to the element on purpose: ClipboardJS delegates from document.body,
     //  so stopping propagation here is what keeps an empty schedule from being copied.

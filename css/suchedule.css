@@ -791,8 +791,8 @@ tr > td:first-child, th:first-child {
     }
 }
 
-/* Google Calendar Extension Styles */
-#google-calendar-modal div {
+/* Calendar Export Styles */
+#export-modal div {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -804,25 +804,37 @@ tr > td:first-child, th:first-child {
     margin-top: 0.3em;
 }
 
-#notification-area {
-    height: 6rem;
-    overflow-y: scroll;
-    padding: 0.4em;
-    align-items: flex-start !important;
-    background-color: aliceblue;
+#export-fields label {
+    margin-bottom: 0.2em;
+}
+
+#export-fields label:not(:first-child) {
+    margin-top: 0.8em;
+}
+
+#export-fields input {
+    padding: 0.35rem;
+    font-size: 15px;
+    font-family: inherit;
+    color: #011627;
     border: 1px solid #999;
-    border-right: unset;
-    border-left: unset;
-    color: #4d4d4d;
 }
 
-#notification-area > * {
-    margin: unset;
-    margin-bottom: 0.4em;
+#export-message:empty {
+    display: none;
 }
 
-#current-calendar-name {
-    font-weight: bold;
+#export-message {
+    margin: 1em 0 0 0 !important;
+    text-align: center;
+    color: #173A6A;
+}
+
+#export-note {
+    margin: 0.4em 0 0 0;
+    font-size: 12px;
+    text-align: center;
+    color: gray;
 }
 
 /* ANIMATIONS */
