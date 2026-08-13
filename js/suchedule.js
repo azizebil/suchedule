@@ -1,10 +1,131 @@
 const config = {
-    term: '202601',
-    dataVersion: 82
+    infoLinkBase: 'https://suis.sabanciuniv.edu/prod/bwckschd.p_disp_detail_sched'
 };
 
-config.infoLink = `https://suis.sabanciuniv.edu/prod/bwckschd.p_disp_detail_sched?term_in=${config.term}&crn_in=`;
 Object.freeze(config);
+
+//  The active term changes at runtime now, so the link cannot be baked in at load time.
+const getInfoLink = (term, crn) => `${config.infoLinkBase}?term_in=${term}&crn_in=${crn}`;
+
+const terms = (() => {
+    //  Term codes are YYYY + season, where the year is the start of the academic year.
+    //  Verified against bannerweb's own term list: 202601 is "Fall 2026-2027".
+    const seasons = {'01': 'Fall', '02': 'Spring', '03': 'Summer'};
+
+    let list = [];
+
+    const getLabel = term => {
+        const year = Number(term.slice(0, 4));
+
+        return `${year}-${year + 1} ${seasons[term.slice(4)] || term.slice(4)}`;
+    };
+
+    const setList = value => list = value;
+
+    const getList = () => list;
+
+    //  terms.json keeps the newest term first.
+    const getCurrent = () => list[0].term;
+
+    const has = term => list.some(entry => entry.term === term);
+
+    const getVersion = term => list.find(entry => entry.term === term).dataVersion;
+
+    const getActive = () => {
+        const stored = localStorage.getItem('active-term');
+
+        return has(stored) ? stored : getCurrent();
+    };
+
+    const setActive = term => localStorage.setItem('active-term', term);
+
+    const dataFile = term => `data-${term}-v${getVersion(term)}.min.json`;
+
+    const cacheKey = term => `course-data-${term}-${getVersion(term)}`;
+
+    //  Only drops what no longer matches terms.json. The old blanket "delete anything
+    //  containing saved-schedule" wiped the other term's schedule on every data update.
+    const clearOutdated = () => {
+        const validCaches = list.map(entry => cacheKey(entry.term));
+        const knownTerms = list.map(entry => entry.term);
+        const outdated = [];
+
+        Object.keys(localStorage).forEach(key => {
+            if (key.indexOf('course-data-') === 0) {
+                if (validCaches.indexOf(key) > -1) {
+                    return;
+                }
+
+                const term = key.split('-')[2];
+
+                if (knownTerms.indexOf(term) > -1 && outdated.indexOf(term) === -1) {
+                    outdated.push(term);
+                }
+
+                localStorage.removeItem(key);
+
+                return;
+            }
+
+            if (key.indexOf('saved-schedules-') === 0 || key.indexOf('active-scenario-') === 0) {
+                if (knownTerms.indexOf(key.slice(key.lastIndexOf('-') + 1)) === -1) {
+                    localStorage.removeItem(key);
+                }
+            }
+        });
+
+        //  A term whose data changed keeps its tabs but loses their crns, which may no
+        //  longer exist. Terms that did not change are left alone.
+        outdated.forEach(term => {
+            localStorage.removeItem(`saved-schedules-${term}`);
+            localStorage.removeItem(`active-scenario-${term}`);
+        });
+
+        return outdated;
+    };
+
+    const renderSelect = () => {
+        $('#term-select').html(
+            list.map(entry => templateGenerator.makeTermOption(entry.term, getLabel(entry.term))).join('')
+        ).val(getActive());
+    };
+
+    const updateNotice = () => {
+        const active = getActive();
+
+        $('#term-notice')
+            .toggle(active !== getCurrent())
+            .text(`Viewing a past term (${getLabel(active)})`);
+    };
+
+    return {
+        getLabel, setList, getList, getCurrent, has, getVersion, getActive, setActive,
+        dataFile, cacheKey, clearOutdated, renderSelect, updateNotice
+    };
+})();
+
+const courseData = (() => {
+    const load = term => {
+        const cached = localStorage.getItem(terms.cacheKey(term));
+
+        if (cached !== null) {
+            return $.Deferred().resolve(JSON.parse(cached)).promise();
+        }
+
+        return $.getJSON(terms.dataFile(term)).then(data => {
+            try {
+                localStorage.setItem(terms.cacheKey(term), JSON.stringify(data));
+            } catch (error) {
+                //  Two terms of data sit well inside the usual 5 MB, but a full quota
+                //  throws rather than failing quietly, and it must not break the load.
+            }
+
+            return data;
+        });
+    };
+
+    return {load};
+})();
 
 const templateGenerator = (() => {
     const getDayFromCode = (() => {
@@ -26,7 +147,7 @@ const templateGenerator = (() => {
         return `${start < 10 ? '0' : ''}${start}:40-${end < 10 ? '0' : ''}${end}:30`;
     };
 
-    const makeCourseEntry = (course, instructors, places) => `
+    const makeCourseEntry = (course, instructors, places, term) => `
         <div class="course-entry hide-info" data-code="${course.code}">
             <div class="course-header">
                 <div class="course-name">${course.code} - ${course.name}</div>
@@ -43,7 +164,7 @@ const templateGenerator = (() => {
                     <div class="section-info">
                         <div class="section-header">
                             <div class="section-group" data-group="${section.group}">${section.group}</div>
-                            <a href="${config.infoLink}${section.crn}" class="section-link" target="_blank">info</a>
+                            <a href="${getInfoLink(term, section.crn)}" class="section-link" target="_blank">info</a>
                         </div>
                         <div class="instructor">${instructors[section.instructors]}</div>
                         <div class="section-days">
@@ -88,11 +209,14 @@ const templateGenerator = (() => {
 
     const makeScenarioAddButton = () => `<div id="scenario-add" title="New plan">+</div>`;
 
+    const makeTermOption = (term, label) => `<option value="${term}">${label}</option>`;
+
     return {
         makeCourseEntry,
         makeCellCourse,
         makeScenarioTab,
-        makeScenarioAddButton
+        makeScenarioAddButton,
+        makeTermOption
     };
 })();
 
@@ -132,15 +256,15 @@ const scenarios = (() => {
     const MAX = 5;
     const LETTERS = 'ABCDE';
 
-    //  The key has to contain 'saved-schedule': clearOldData in updateCourseData wipes
-    //  every key matching that substring when the course data changes, which is what
-    //  keeps stale crns out of the saved plans.
-    const storageKey = 'saved-schedules';
+    //  Keyed per term: each term keeps its own set of plans and its own active tab.
+    const storageKey = () => `saved-schedules-${terms.getActive()}`;
+
+    const activeKey = () => `active-scenario-${terms.getActive()}`;
 
     let plans = [];
     let pendingClose = null;
 
-    const write = () => localStorage.setItem(storageKey, JSON.stringify(plans));
+    const write = () => localStorage.setItem(storageKey(), JSON.stringify(plans));
 
     const count = () => plans.length;
 
@@ -155,7 +279,7 @@ const scenarios = (() => {
     };
 
     const getActiveIndex = () => {
-        const stored = Number(localStorage.getItem('active-scenario')) || 0;
+        const stored = Number(localStorage.getItem(activeKey())) || 0;
 
         return stored >= 0 && stored < plans.length ? stored : 0;
     };
@@ -217,7 +341,7 @@ const scenarios = (() => {
 
     const switchTo = index => {
         //  Set first: the clicks below run through addToSchedule, which saves to the active plan.
-        localStorage.setItem('active-scenario', index);
+        localStorage.setItem(activeKey(), index);
 
         markActiveTab();
 
@@ -290,7 +414,7 @@ const scenarios = (() => {
 
         plans.splice(to, 0, plans.splice(from, 1).shift());
 
-        localStorage.setItem('active-scenario', plans.indexOf(activePlan));
+        localStorage.setItem(activeKey(), plans.indexOf(activePlan));
 
         write();
         renderTabs();
@@ -342,42 +466,65 @@ const scenarios = (() => {
         switchTo(getActiveIndex());
     };
 
-    //  Runs at definition time so the plan list is ready for anything that reads it
-    //  before the DOM work starts - shareLink.offerImport in particular.
-    (migrate = () => {
+    const sanitise = value => (Array.isArray(value) ? value : [])
+        .filter(plan => plan !== null && typeof plan === 'object' && typeof plan.crns === 'string')
+        .map(plan => ({name: String(plan.name || ''), crns: plan.crns}))
+        .slice(0, MAX);
+
+    const read = key => {
         try {
-            plans = JSON.parse(localStorage.getItem(storageKey)) || [];
+            return sanitise(JSON.parse(localStorage.getItem(key)));
         } catch (error) {
-            plans = [];
+            return [];
+        }
+    };
+
+    //  Every earlier layout was term-less, so its schedules belong to the current term.
+    //  Without this, upgrading users open the app to an empty schedule.
+    const migrateLegacy = currentTerm => {
+        const target = `saved-schedules-${currentTerm}`;
+
+        if (localStorage.getItem(target) === null) {
+            let carried = read('saved-schedules');
+
+            if (carried.length === 0) {
+                //  Before the single key there were three fixed plans, and before those one schedule.
+                carried = ['saved-schedule-0', 'saved-schedule-1', 'saved-schedule-2', 'saved-schedule']
+                    .map(key => localStorage.getItem(key))
+                    .filter(crns => crns !== null && crns !== '')
+                    .map((crns, index) => ({name: `Plan ${LETTERS[index]}`, crns}));
+            }
+
+            if (carried.length > 0) {
+                localStorage.setItem(target, JSON.stringify(carried));
+
+                const legacyActive = localStorage.getItem('active-scenario');
+
+                if (legacyActive !== null) {
+                    localStorage.setItem(`active-scenario-${currentTerm}`, legacyActive);
+                }
+            }
         }
 
-        plans = (Array.isArray(plans) ? plans : [])
-            .filter(plan => plan !== null && typeof plan === 'object' && typeof plan.crns === 'string')
-            .map(plan => ({name: String(plan.name || ''), crns: plan.crns}));
+        ['saved-schedule', 'saved-schedule-0', 'saved-schedule-1', 'saved-schedule-2',
+            'saved-schedules', 'active-scenario'].forEach(key => localStorage.removeItem(key));
+    };
 
-        if (plans.length === 0) {
-            //  Older layouts: three fixed plans, and before those a single schedule.
-            plans = ['saved-schedule-0', 'saved-schedule-1', 'saved-schedule-2', 'saved-schedule']
-                .map(key => localStorage.getItem(key))
-                .filter(crns => crns !== null && crns !== '')
-                .map((crns, index) => ({name: `Plan ${LETTERS[index]}`, crns}));
-        }
+    //  Called on every term switch: the plan list belongs to the term, not to the session.
+    const loadForActiveTerm = () => {
+        plans = read(storageKey());
 
         if (plans.length === 0) {
             plans = [{name: `Plan ${LETTERS[0]}`, crns: ''}];
         }
 
-        plans = plans.slice(0, MAX);
-
-        ['saved-schedule', 'saved-schedule-0', 'saved-schedule-1', 'saved-schedule-2']
-            .forEach(key => localStorage.removeItem(key));
-
         write();
-    })();
+    };
 
     return {
         MAX, count, nextName, getActiveIndex, getName, getActiveName, crnCount, saveActive,
-        clearScheduleDom, renderTabs, switchTo, add, requestClose, confirmClose, rename, replaceActive, move
+        clearScheduleDom, renderTabs, switchTo, add, requestClose, confirmClose, rename, replaceActive, move,
+        migrateLegacy, loadForActiveTerm
     };
 })();
 
@@ -641,18 +788,15 @@ const courseEntry = (() => {
 
     courseEntry.make = (course, instructors) => courseEntry(templateGenerator.makeCourseEntry(course, instructors));
 
-    courseEntry.populate = (courses, instructors, places) => {
+    //  Filters are not applied here any more: populate now runs on every term switch, and
+    //  the freshly built entries carry no filter-hide classes at all, so the caller has to
+    //  re-run every filter rather than just the level one.
+    courseEntry.populate = (courses, instructors, places, term) => {
         const $list = $('#course-list').removeClass('loading');
 
         courses.forEach(course => {
-            $list.append(templateGenerator.makeCourseEntry(course, instructors, places));
+            $list.append(templateGenerator.makeCourseEntry(course, instructors, places, term));
         });
-
-        //  Covers the first visit, where the list arrives asynchronously from $.getJSON
-        //  and therefore misses the pass done by setLevelFilterEvents.
-        courseEntry.filterByLevel();
-
-        shareLink.offerImport();
     };
 
     return courseEntry;
@@ -1209,7 +1353,7 @@ const icsExport = (() => {
 
     const download = text => {
         const url = URL.createObjectURL(new Blob([text], {type: 'text/calendar;charset=utf-8'}));
-        const $link = $('<a>').attr({href: url, download: `suchedule-${config.term}.ics`});
+        const $link = $('<a>').attr({href: url, download: `suchedule-${terms.getActive()}.ics`});
 
         $('body').append($link);
 
@@ -1254,7 +1398,7 @@ const shareLink = (() => {
     const make = () => {
         const crns = cellCourses.getAllCrnDataToSave();
 
-        return `${location.origin}${location.pathname}#term=${config.term}&crns=${crns.join(',')}`;
+        return `${location.origin}${location.pathname}#term=${terms.getActive()}&crns=${crns.join(',')}`;
     };
 
     const parse = () => {
@@ -1292,9 +1436,17 @@ const shareLink = (() => {
 
     let pending = null;
 
-    //  Called from courseEntry.populate, which is the one point both the synchronous and
-    //  the $.getJSON path go through. Anywhere else and a first-time visitor - which is
-    //  exactly who opens a shared link - would find no .course-section to match against.
+    const targetSentence = () => {
+        const target = resolveTarget();
+
+        return target.isNew
+            ? ` Load it into a new plan (${target.name})?`
+            : ` All ${scenarios.MAX} plans are in use, so this will replace ${target.name}` +
+              ` (${target.courses} course${target.courses === 1 ? '' : 's'}). Load it anyway?`;
+    };
+
+    //  Called once the course list is on the page. Before multi-term this refused any link
+    //  from another term; now a term the app still carries is simply switched to.
     const offerImport = () => {
         const shared = parse();
 
@@ -1302,10 +1454,23 @@ const shareLink = (() => {
             return;
         }
 
-        if (shared.term !== null && shared.term !== config.term) {
+        if (shared.term !== null && !terms.has(shared.term)) {
             notify('notify-share-invalid',
-                `This link is for term ${shared.term}, but the current term is ${config.term}. ` +
-                `Ask for a fresh link.`);
+                `This link is for term ${shared.term}, which SUchedule no longer carries.` +
+                ` Ask for a link from ${terms.getList().map(entry => terms.getLabel(entry.term)).join(' or ')}.`);
+
+            return;
+        }
+
+        pending = shared;
+
+        //  A link for another term cannot be checked against the list on screen, so the
+        //  crns are verified after the switch instead.
+        if (shared.term !== null && shared.term !== terms.getActive()) {
+            notify('notify-share-import',
+                `Someone shared a ${terms.getLabel(shared.term)} schedule of ${shared.crns.length}` +
+                ` course${shared.crns.length === 1 ? '' : 's'} with you.` +
+                ` Switch to that term and load it into a new plan?`);
 
             return;
         }
@@ -1314,23 +1479,37 @@ const shareLink = (() => {
         const missing = shared.crns.length - found.length;
 
         if (found.length === 0) {
+            pending = null;
+
             notify('notify-share-invalid',
-                `None of the ${shared.crns.length} courses in this link exist in term ${config.term}.`);
+                `None of the ${shared.crns.length} courses in this link exist in ${terms.getLabel(terms.getActive())}.`);
 
             return;
         }
 
-        const target = resolveTarget();
-
-        pending = found;
-
         notify('notify-share-import',
             `Someone shared a schedule of ${found.length} course${found.length === 1 ? '' : 's'} with you.` +
             `${missing > 0 ? ` ${missing} of them could not be found in this term.` : ''}` +
-            (target.isNew
-                ? ` Load it into a new plan (${target.name})?`
-                : ` All ${scenarios.MAX} plans are in use, so this will replace ${target.name}` +
-                  ` (${target.courses} course${target.courses === 1 ? '' : 's'}). Load it anyway?`));
+            targetSentence());
+    };
+
+    const applyImport = crns => {
+        const found = crns.filter(crn => $(`.course-section[data-crn="${crn}"]`).length > 0);
+
+        if (found.length === 0) {
+            notify('notify-share-invalid', 'None of the courses in that link exist in this term.');
+
+            return;
+        }
+
+        //  Resolved again rather than reused: the visitor may have added or closed a plan
+        //  while the confirmation was sitting on screen.
+        resolveTarget().isNew ? scenarios.add(found.join(',')) : scenarios.replaceActive(found.join(','));
+
+        if (found.length < crns.length) {
+            notify('notify-share-invalid',
+                `${crns.length - found.length} of the shared courses could not be found in this term.`);
+        }
     };
 
     const acceptImport = () => {
@@ -1338,14 +1517,20 @@ const shareLink = (() => {
             return;
         }
 
-        //  Resolved again rather than reused: the visitor may have added or closed a plan
-        //  while the confirmation was sitting on screen.
-        resolveTarget().isNew ? scenarios.add(pending.join(',')) : scenarios.replaceActive(pending.join(','));
+        const shared = pending;
 
         pending = null;
 
         //  Without this the confirmation comes back on every reload and fights the user's own edits.
         history.replaceState(null, '', location.pathname);
+
+        if (shared.term !== null && shared.term !== terms.getActive()) {
+            switchTerm(shared.term).then(() => applyImport(shared.crns));
+
+            return;
+        }
+
+        applyImport(shared.crns);
     };
 
     return {make, parse, offerImport, acceptImport};
@@ -1360,56 +1545,44 @@ const shareLink = (() => {
     }
 })();
 
-(updateCourseData = () => {
-    const storageKey = `course-data-${config.term}-${config.dataVersion}`;
-    const data = localStorage.getItem(storageKey);
+//  populate builds brand new .course-entry elements with no filter-hide classes on them,
+//  so after any repopulation every filter has to run again or the controls will show a
+//  filter as active while the list plainly ignores it.
+const applyAllFilters = () => {
+    sectionEntry.filterByDays();
 
-    const showNotification = () => {
-        $('#notify-data-updated').fadeIn(500);
-    };
+    courseEntry.filterByLevel();
 
-    
+    sectionEntry.filterByConflicts();
 
-    const clearOldData = () => {
-        let removedData = false;
+    $('#search-box').trigger('input');
+};
 
-        for (let i = 0; ; i++) {
-            const key = localStorage.key(i);
+const switchTerm = term => {
+    terms.setActive(term);
+    terms.updateNotice();
 
-            if (key === null) {
-                break;
-            }
+    $('#term-select').val(term);
 
-            if (key.indexOf('course-data') > -1 || key.indexOf('saved-schedule') > -1) {
-                localStorage.removeItem(key);
-
-                removedData = true;
-            }
-        }
-
-        if (removedData) {
-            showNotification();
-        }
-    };
-
-    if (data !== null) {
-        const {courses, instructors, places} = JSON.parse(data);
-
-        courseEntry.populate(courses, instructors, places);
-
-        return;
+    if (courseEntry.isOnDisplayMode()) {
+        courseEntry.endDisplayMode();
     }
 
-    $.getJSON(`data-v${config.dataVersion}.min.json`, data => {
-        const {courses, instructors, places} = data;
+    //  Reset without saving: writing here would overwrite the target term with an empty plan.
+    scenarios.clearScheduleDom();
 
-        clearOldData();
+    $('#course-list').empty().addClass('loading');
 
-        courseEntry.populate(courses, instructors, places);
+    return courseData.load(term).then(data => {
+        courseEntry.populate(data.courses, data.instructors, data.places, term);
 
-        localStorage.setItem(storageKey, JSON.stringify(data));
+        scenarios.loadForActiveTerm();
+        scenarios.renderTabs();
+        scenarios.switchTo(scenarios.getActiveIndex());
+
+        applyAllFilters();
     });
-})();
+};
 
 (setLevelFilterEvents = () => {
     const storageKey = 'level-filter';
@@ -1514,6 +1687,8 @@ const normalizeSearchParam = (query) => {
     $('#search-category').on('change', searchParameterChange);
 
     $('#search-box').on('input', searchParameterChange);
+
+    $('#term-select').on('change', event => switchTerm($(event.currentTarget).val()));
 
     $('#menu-toggle').on('click', () => $('body').toggleClass('hide-menu'));
 
@@ -1685,10 +1860,37 @@ const normalizeSearchParam = (query) => {
     });
 })();
 
-(loadScheduleFromLocalStorage = () => {
-    scenarios.renderTabs();
+//  The whole boot is asynchronous now: terms.json decides which data file to fetch, so
+//  nothing that touches the course list can run before this resolves.
+(loadTermsAndSchedule = () => {
+    $.getJSON('terms.json').then(data => {
+        terms.setList(data.terms);
+        terms.renderSelect();
 
-    scenarios.switchTo(scenarios.getActiveIndex());
+        scenarios.migrateLegacy(terms.getCurrent());
+
+        const outdated = terms.clearOutdated();
+
+        if (outdated.length > 0) {
+            $('#notify-data-updated .notification-content p').text(
+                `The courses for ${outdated.map(terms.getLabel).join(' and ')} changed, so the plans saved` +
+                ` for ${outdated.length === 1 ? 'that term' : 'those terms'} were cleared.`
+            );
+
+            $('#notify-data-updated').fadeIn(500);
+        }
+
+        return switchTerm(terms.getActive());
+    }).then(() => shareLink.offerImport()).fail(() => {
+        //  Without terms.json there is no data file to fetch, so say so rather than
+        //  leaving the spinner turning forever.
+        $('#course-list').removeClass('loading');
+
+        $('#notify-share-invalid .notification-content p')
+            .text('Course data could not be loaded. Please refresh the page.');
+
+        $('#notify-share-invalid').fadeIn(500);
+    });
 })();
 
 (setNotificationEvents = () => {

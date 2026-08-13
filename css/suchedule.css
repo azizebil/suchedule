@@ -107,6 +107,34 @@ header .button {
     opacity: 0.7;
 }
 
+#term-select-container {
+    flex-direction: column;
+}
+
+#term-select {
+    width: 100%;
+    padding: 0.5rem 0.4rem;
+    font-size: 15px;
+    font-family: inherit;
+    color: white;
+    background: #4183c4 none;
+    border: none;
+    cursor: pointer;
+    border-radius: 0;
+    box-shadow: none;
+}
+#term-select option {
+    background-color: white;
+    color: black;
+}
+
+#term-notice {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #f2ad9f;
+    user-select: none;
+}
+
 #search-box-container {
     min-height: 42px;
 }

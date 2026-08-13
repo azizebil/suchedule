@@ -36,41 +36,31 @@ jobs:
           echo "Current term: $CURRENT_TERM"
           echo "::endgroup::"
           
-          # Get current version number
-          echo "::group::Getting current version"
-          CURRENT_VERSION=$(ls data-v*.min.json | grep -o '[0-9]\+')
-          NEXT_VERSION=$((CURRENT_VERSION + 1))
-          echo "Current version: $CURRENT_VERSION"
-          echo "Next version will be: $NEXT_VERSION"
+          echo "::group::Current terms"
+          cat terms.json
           echo "::endgroup::"
-          
+
           echo "::group::Running scraper"
           echo "Running scraper/scrape.py with term $CURRENT_TERM"
           # Run scraping script with term argument
           python scraper/scrape.py $CURRENT_TERM
           echo "::endgroup::"
-          
-          echo "::group::Checking for changes"
-          # Check if there are any changes
-          if cmp -s data.min.json "data-v${CURRENT_VERSION}.min.json"; then
-            echo "No changes detected in scraped data"
-            rm data.min.json
-            echo "Removed temporary data.min.json"
-            echo "changes=false" >> $GITHUB_OUTPUT
-          else
-            echo "Changes detected in scraped data"
-            echo "Moving data.min.json to data-v${NEXT_VERSION}.min.json"
-            mv data.min.json "data-v${NEXT_VERSION}.min.json"
-            echo "Removing old data-v${CURRENT_VERSION}.min.json"
-            git rm -f "data-v${CURRENT_VERSION}.min.json"
-            
-            echo "Updating JavaScript files"
-            # Update version and term in JavaScript files
-            sed -i "s/dataVersion:\([[:space:]]*\)[0-9]\+/dataVersion:\1${NEXT_VERSION}/g" js/suchedule*.js
-            sed -i "s/term:\([[:space:]]*\)\(.\)[0-9]\+\(.\)/term:\1\2${CURRENT_TERM}\3/g" js/suchedule*.js
-            
+
+          echo "::group::Folding the scrape into terms.json"
+          # update_terms.py bumps only this term's version, removes only this term's old
+          # data file, and drops the oldest term once the list grows past two.
+          python scraper/update_terms.py "$CURRENT_TERM" data.min.json | tee /tmp/update_terms.out
+          echo "::endgroup::"
+
+          echo "::group::Result"
+          if grep -q '^changed=true$' /tmp/update_terms.out; then
             echo "changes=true" >> $GITHUB_OUTPUT
-            echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+            echo "version=$(grep '^version=' /tmp/update_terms.out | cut -d= -f2)" >> $GITHUB_OUTPUT
+            echo "term=$CURRENT_TERM" >> $GITHUB_OUTPUT
+            cat terms.json
+          else
+            echo "No changes detected in scraped data"
+            echo "changes=false" >> $GITHUB_OUTPUT
           fi
           echo "::endgroup::"
           
@@ -79,11 +69,12 @@ jobs:
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: update data to v${{ steps.check.outputs.version }}"
-          title: "Data Update to v${{ steps.check.outputs.version }}"
+          commit-message: "chore: update ${{ steps.check.outputs.term }} data to v${{ steps.check.outputs.version }}"
+          title: "Data Update: ${{ steps.check.outputs.term }} v${{ steps.check.outputs.version }}"
           body: |
             Automated data update
-            
+
+            - Term: ${{ steps.check.outputs.term }}
             - Updated data file to version ${{ steps.check.outputs.version }}
             - Last updated: ${{ github.event.repository.updated_at }}
             
