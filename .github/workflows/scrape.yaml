@@ -46,6 +46,13 @@ jobs:
           python scraper/scrape.py $CURRENT_TERM
           echo "::endgroup::"
 
+          echo "::group::Validating the scrape"
+          # A broken parser does not raise, it just writes nulls. Publishing that would
+          # bump the data version and wipe every user's saved plans for this term, so the
+          # file has to clear the thresholds before it is allowed near a commit.
+          python scraper/validate.py data.min.json
+          echo "::endgroup::"
+
           echo "::group::Folding the scrape into terms.json"
           # update_terms.py bumps only this term's version, removes only this term's old
           # data file, and drops the oldest term once the list grows past two.

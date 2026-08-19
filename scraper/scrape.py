@@ -3,6 +3,8 @@ from typing import List, Dict
 import requests
 import json
 import sys
+import re
+import time
 
 from bs4 import BeautifulSoup
 
@@ -12,6 +14,24 @@ class SUcheduleCourseScraper:
         self.term = term
         self.instructors = []
         self.places = []
+        self.catalog_cache = {}
+        #  492 catalog fetches over one connection instead of 492 handshakes.
+        self.session = requests.Session()
+
+    @staticmethod
+    def to_number(text):
+        """
+        '3.000' -> 3, '1.500' -> 1.5, anything unparsable -> None.
+        Credits are kept numeric so the front end never has to parse strings, and
+        unknown stays None rather than 0 - a real 0 is information, a missing
+        value is not.
+        """
+        try:
+            value = float(text)
+        except (TypeError, ValueError):
+            return None
+
+        return int(value) if value == int(value) else value
 
     def run(self) -> None:
         """
@@ -34,8 +54,8 @@ class SUcheduleCourseScraper:
         headers = {'Content-type': 'application/x-www-form-urlencoded'}
 
         # Sends request to bannerweb
-        data = requests.post(f"https://suis.sabanciuniv.edu/prod/bwckgens.p_proc_term_date",
-                             data=payload, headers=headers)
+        data = self.session.post(f"https://suis.sabanciuniv.edu/prod/bwckgens.p_proc_term_date",
+                             data=payload, headers=headers, timeout=60)
 
         # Parses html and catches course codes
         source = BeautifulSoup(data.content, 'html.parser')
@@ -64,8 +84,8 @@ class SUcheduleCourseScraper:
         headers = {'Content-type': 'application/x-www-form-urlencoded'}
 
         # Sends request to bannerweb
-        data = requests.post(f"https://suis.sabanciuniv.edu/prod/bwckschd.p_get_crse_unsec",
-                             data=payload, headers=headers)
+        data = self.session.post(f"https://suis.sabanciuniv.edu/prod/bwckschd.p_get_crse_unsec",
+                             data=payload, headers=headers, timeout=60)
 
         # Parses html and catches course title, crn code, course code and section code
         source = BeautifulSoup(data.content, 'html.parser')
@@ -92,7 +112,36 @@ class SUcheduleCourseScraper:
 
         # Catch course sections
         next_sibling = course.parent.find_next_sibling("tr")
-        if next_sibling.find("table") is not None:
+
+        #  Unknown stays None all the way through; only the front end turns it into "N/A".
+        credits_value = None
+        ects_credits = None
+        eng_credits = None
+        basic_credits = None
+
+        if next_sibling is not None:
+            #  Fractional credits exist (1.500 Credits), so match the number rather
+            #  than truncating at the decimal point.
+            credits_match = re.search(r"([\d.]+)\s+Credits", next_sibling.get_text())
+            if credits_match:
+                credits_value = self.to_number(credits_match.group(1))
+
+            catalog_link_tag = next_sibling.find("a", string=re.compile("View Catalog Entry", re.IGNORECASE))
+            if catalog_link_tag:
+                catalog_url = "https://suis.sabanciuniv.edu" + catalog_link_tag.get("href")
+                #  Normalised, otherwise CS 201 and CS 201R cache separately and the
+                #  same catalog page is fetched twice.
+                course_code_key = self.set_course_code(title[-2])
+
+                if course_code_key in self.catalog_cache:
+                    ects_credits, eng_credits, basic_credits = self.catalog_cache[course_code_key]
+                else:
+                    ects_credits, eng_credits, basic_credits = self.get_catalog_details(catalog_url)
+                    self.catalog_cache[course_code_key] = (ects_credits, eng_credits, basic_credits)
+                    # Be polite to the server
+                    time.sleep(0.1)
+
+        if next_sibling is not None and next_sibling.find("table") is not None:
             table = [item for item in next_sibling.find("table").find_all("tr") if item.find("td")]
             sections = [row.find_all("td") for row in table]
         else:
@@ -103,6 +152,10 @@ class SUcheduleCourseScraper:
             "name": title[0],
             "crn": title[-3],
             "code": title[-2],
+            "cr": credits_value,
+            "ects": ects_credits,
+            "eng": eng_credits,
+            "bsc": basic_credits,
             "section": [
                 {
                     "day": schedule[2].text,
@@ -116,6 +169,76 @@ class SUcheduleCourseScraper:
 
         return course_information
 
+    def get_catalog_details(self, url: str):
+        """
+        Read ECTS, Engineering and Basic Science credits off a catalog entry page.
+
+        Always returns a 3-tuple. The previous version returned four values on a
+        non-200 response, which raised ValueError at the call site and took the
+        whole scrape down on any single 5xx.
+
+        Returns (ects, engineering, basic_science); each is a number, or None when
+        the page carries no attribute block at all - special topic courses have none.
+        """
+        response = None
+
+        for attempt in range(2):
+            try:
+                response = self.session.get(url, timeout=15)
+                break
+            except requests.RequestException as error:
+                print(f"Catalog request failed ({attempt + 1}/2) for {url}: {error}")
+
+        if response is None or response.status_code != 200:
+            print(f"Skipping catalog {url}: {response.status_code if response else 'no response'}")
+            return None, None, None
+
+        try:
+            soup = BeautifulSoup(response.content, "html.parser")
+            content = soup.find("td", attrs={"class": "ntdefault"})
+
+            if content is None:
+                return None, None, None
+
+            full_text = content.get_text(separator="\n", strip=True)
+
+            #  Everything we want sits under "Course Attributes:"; bounding the search
+            #  keeps a number from a later section being read as a credit.
+            if "Course Attributes:" not in full_text:
+                return None, None, None
+
+            attributes = full_text.split("Course Attributes:", 1)[1]
+
+            for boundary in ("Restrictions:", "Corequisites:", "Prerequisites:"):
+                attributes = attributes.split(boundary, 1)[0]
+
+            #  Format on the page: "Lang. of Instruction: English, 6 ECTS (ENGINEERING:6 / BASIC:0)"
+            ects_match = re.search(r"([\d.]+)\s*ECTS", attributes, re.IGNORECASE)
+
+            #  Three cases live in this field and only two of them are the same thing:
+            #    (ENGINEERING:6 / BASIC:0)  -> stated values
+            #    (ENGINEERING: / BASIC:)    -> stated as carrying neither, i.e. zero.
+            #                                  FASS courses come both ways, ECON 201 writes
+            #                                  0 explicitly while SPS 101 leaves it blank.
+            #    no parenthesis at all      -> the catalog says nothing, which is not zero.
+            attribute_match = re.search(
+                r"\(\s*ENGINEERING:([^/]*)/\s*BASIC:([^)]*)\)", attributes, re.IGNORECASE | re.DOTALL
+            )
+
+            def credit(raw):
+                raw = raw.strip()
+
+                return 0 if raw == "" else self.to_number(raw)
+
+            return (
+                self.to_number(ects_match.group(1)) if ects_match else None,
+                credit(attribute_match.group(1)) if attribute_match else None,
+                credit(attribute_match.group(2)) if attribute_match else None,
+            )
+        except Exception as error:
+            print(f"Error parsing catalog {url}: {error}")
+            return None, None, None
+
     def set_course_informations(self, course_informations: List[Dict]) -> List[Dict]:
         """
         Edit course information for json file.
@@ -124,11 +247,24 @@ class SUcheduleCourseScraper:
         for course_info in course_informations:
             name = self.set_course_name(course_info["name"])
             code = self.set_course_code(course_info["code"])
+            cr_val = course_info["cr"]
             crn = self.remove_blank_spaces(course_info["crn"])
+
+            ects = course_info["ects"]
+            eng = course_info["eng"]
+            basic = course_info["bsc"]
+
             course_class = self.set_course_class(course_info["section"], course_info["code"], crn)
 
             course = next((item for item in data if item["code"] == code), None)
             if course is not None:
+                #  "not course[...]" used to be the test here, which never fired: the old
+                #  default was the string "0" and that is truthy. With None as the default
+                #  the fill-if-missing rule finally works, and a real 0 is never overwritten.
+                for key, value in (("cr", cr_val), ("ects", ects), ("eng", eng), ("bsc", basic)):
+                    if course[key] is None and value is not None:
+                        course[key] = value
+
                 classes = next((item for item in course["classes"] if item["type"] == course_class["type"]), None)
                 if classes is None:
                     course["classes"].append({
@@ -142,6 +278,10 @@ class SUcheduleCourseScraper:
                 data.append({
                     "name": name,
                     "code": code,
+                    "cr": cr_val,
+                    "ects": ects,
+                    "eng": eng,
+                    "bsc": basic,
                     "classes": [{
                         "type": course_class["type"],
                         "sections": [course_class["sections"]]
@@ -269,6 +409,7 @@ class SUcheduleCourseScraper:
         except ValueError:
             return 5
 
+    
     @staticmethod
     def set_course_time(time: str) -> (int, int):
         """

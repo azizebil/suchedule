@@ -79,14 +79,16 @@ def main():
         next_version = existing["dataVersion"] + 1
         git_rm(data_file(term, existing["dataVersion"]))
         existing["dataVersion"] = next_version
-        #  Keep the freshest term first; the app treats terms[0] as the current one.
-        terms.remove(existing)
-        terms.insert(0, existing)
     else:
         next_version = 1
-        terms.insert(0, {"term": term, "dataVersion": next_version})
+        terms.append({"term": term, "dataVersion": next_version})
 
     os.replace(scraped, data_file(term, next_version))
+
+    #  Sorted rather than "put the scraped one first": the workflow always scrapes the
+    #  current term, but a past term backfilled by hand must not be promoted to current.
+    #  Term codes sort chronologically as plain strings - 202601 > 202503 > 202502.
+    terms.sort(key=lambda entry: entry["term"], reverse=True)
 
     #  A new term pushes the oldest one out of the list, and its data file with it.
     while len(terms) > MAX_TERMS:

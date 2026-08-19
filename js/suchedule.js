@@ -147,13 +147,33 @@ const templateGenerator = (() => {
         return `${start < 10 ? '0' : ''}${start}:40-${end < 10 ? '0' : ''}${end}:30`;
     };
 
+    //  == null on purpose, never a truthy test: a real 0 credit is information and
+    //  must not be shown as N/A. Only null and undefined mean "the catalog did not say".
+    const creditValue = value => value == null ? 'N/A' : value;
+
+    //  Empty attribute means the catalog had nothing, which is not the same as zero.
+    const creditAttribute = value => value == null ? '' : value;
+
+    const makeCourseCredits = course => `
+                <div class="course-credits"
+                     title="Read from the Banner catalog. Confirm with your advisor before relying on it.">
+                    <span>SU <b>${creditValue(course.cr)}</b></span>
+                    <span>ECTS <b>${creditValue(course.ects)}</b></span>
+                    <span>Eng <b>${creditValue(course.eng)}</b></span>
+                    <span>Basic <b>${creditValue(course.bsc)}</b></span>
+                </div>
+    `;
+
     const makeCourseEntry = (course, instructors, places, term) => `
-        <div class="course-entry hide-info" data-code="${course.code}">
+        <div class="course-entry hide-info" data-code="${course.code}"
+             data-cr="${creditAttribute(course.cr)}" data-ects="${creditAttribute(course.ects)}"
+             data-eng="${creditAttribute(course.eng)}" data-bsc="${creditAttribute(course.bsc)}">
             <div class="course-header">
                 <div class="course-name">${course.code} - ${course.name}</div>
                 <div class="course-expand icon-right-open-big"></div>
             </div>
             <div class="course-info">
+            ${makeCourseCredits(course)}
             ${course.classes.map(_class => `
                 <div class="course-sections">
                     <div class="section-type">Sections${_class.type ? ` (${_class.type})` : ``}</div>
@@ -211,9 +231,22 @@ const templateGenerator = (() => {
 
     const makeTermOption = (term, label) => `<option value="${term}">${label}</option>`;
 
+    const makeCreditTotals = (totals, incomplete) => `
+        <span class="credit-total-label">Totals</span>
+        <span>SU <b>${totals.cr}</b></span>
+        <span>ECTS <b>${totals.ects}</b></span>
+        <span>Eng <b>${totals.eng}</b></span>
+        <span>Basic <b>${totals.bsc}</b></span>
+        ${incomplete > 0
+            ? `<span class="credit-total-note">${incomplete} course${incomplete === 1 ? '' : 's'} without catalog data</span>`
+            : ``}
+    `;
+
     return {
         makeCourseEntry,
         makeCellCourse,
+        makeCourseCredits,
+        makeCreditTotals,
         makeScenarioTab,
         makeScenarioAddButton,
         makeTermOption
@@ -354,8 +387,11 @@ const scenarios = (() => {
         load(index);
 
         //  Switching to an empty plan produces no clicks at all, so the conflict filter
-        //  would keep hiding sections based on the plan we just left.
+        //  would keep hiding sections based on the plan we just left, and the totals
+        //  would still show the previous plan's credits.
         sectionEntry.filterByConflicts();
+
+        creditTotals.update();
     };
 
     const add = (crns = '') => {
@@ -528,6 +564,64 @@ const scenarios = (() => {
     };
 })();
 
+const creditTotals = (() => {
+    const fields = ['cr', 'ects', 'eng', 'bsc'];
+
+    //  Summed per course, not per section: a course's lecture and its recitation are two
+    //  cell-courses but one set of credits, so the codes are deduplicated first.
+    const update = () => {
+        const onSchedule = {};
+
+        $('.cell-course').each((i, element) => {
+            onSchedule[cellCourses($(element)).getCourseCodeWithoutSpace()] = 1;
+        });
+
+        const totals = {cr: 0, ects: 0, eng: 0, bsc: 0};
+
+        let counted = 0;
+        let incomplete = 0;
+
+        $('.course-entry').each((i, element) => {
+            const $entry = $(element);
+
+            if (!onSchedule.hasOwnProperty(courseEntry($entry).getCodeWithoutSpace())) {
+                return;
+            }
+
+            counted++;
+
+            let missing = false;
+
+            fields.forEach(field => {
+                const raw = $entry.attr(`data-${field}`);
+
+                //  '' is the catalog saying nothing; 0 is the catalog saying zero.
+                if (raw === '' || raw === undefined) {
+                    missing = true;
+
+                    return;
+                }
+
+                totals[field] += Number(raw);
+            });
+
+            if (missing) {
+                incomplete++;
+            }
+        });
+
+        if (counted === 0) {
+            $('#credit-total').hide();
+
+            return;
+        }
+
+        $('#credit-total').show().html(templateGenerator.makeCreditTotals(totals, incomplete));
+    };
+
+    return {update};
+})();
+
 const saveSchedule = () => {
     scenarios.saveActive(cellCourses.getAllCrnDataToSave().join(','));
 };
@@ -678,6 +772,8 @@ const courseEntry = (() => {
 
         sectionEntry.filterByConflicts();
 
+        creditTotals.update();
+
         return this;
     };
 
@@ -695,6 +791,8 @@ const courseEntry = (() => {
         saveSchedule();
 
         sectionEntry.filterByConflicts();
+
+        creditTotals.update();
 
         return this;
     };
@@ -1912,6 +2010,8 @@ const normalizeSearchParam = (query) => {
         saveSchedule();
 
         sectionEntry.filterByConflicts();
+
+        creditTotals.update();
     });
 })();
 

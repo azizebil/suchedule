@@ -904,3 +904,47 @@ tr > td:first-child, th:first-child {
 .shake, .shake-on-hover:hover {
     animation: shake 100ms linear infinite alternate;
 }
+/* Credit information */
+
+.course-credits {
+    display: flex;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    font-family: monospace;
+    font-size: 15px;
+    color: gray;
+}
+.course-credits span:not(:last-child) {
+    margin-right: 12px;
+}
+.course-credits b {
+    color: #173A6A;
+}
+
+#credit-total {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    flex-shrink: 0;
+    min-width: 800px;
+    padding: 5px 10px 5px 40px;
+    background-color: #6EA4BF;
+    color: white;
+    font-family: monospace;
+    font-size: 14px;
+}
+#credit-total span:not(:last-child) {
+    margin-right: 14px;
+}
+#credit-total b {
+    font-size: 15px;
+}
+.credit-total-label {
+    text-transform: uppercase;
+    opacity: 0.85;
+}
+.credit-total-note {
+    margin-left: auto;
+    font-size: 12px;
+    opacity: 0.9;
+}
