@@ -231,6 +231,21 @@ const templateGenerator = (() => {
 
     const makeTermOption = (term, label) => `<option value="${term}">${label}</option>`;
 
+    //  Two plain range inputs rather than a dual-handle widget: the browser has no such
+    //  control and pulling in a slider library would put back the CDN dependency we removed.
+    const makeCreditMetric = (metric, bound, range) => `
+        <div class="credit-metric" data-metric="${metric.key}">
+            <div class="credit-metric-head">
+                <span>${metric.label}</span>
+                <span class="credit-metric-value">${range[0]} &ndash; ${range[1]}${range[1] >= bound.max && bound.raw > bound.max ? '+' : ''}</span>
+            </div>
+            <input class="credit-min" type="range" min="0" max="${bound.max}" value="${range[0]}"
+                   title="${metric.label} minimum">
+            <input class="credit-max" type="range" min="0" max="${bound.max}" value="${range[1]}"
+                   title="${metric.label} maximum">
+        </div>
+    `;
+
     const makeCreditTotals = (totals, incomplete) => `
         <span class="credit-total-label">Totals</span>
         <span>SU <b>${totals.cr}</b></span>
@@ -247,6 +262,7 @@ const templateGenerator = (() => {
         makeCellCourse,
         makeCourseCredits,
         makeCreditTotals,
+        makeCreditMetric,
         makeScenarioTab,
         makeScenarioAddButton,
         makeTermOption
@@ -866,6 +882,16 @@ const courseEntry = (() => {
             course => course.isGraduate() === (mode === 'grad'),
             'level'
         );
+    };
+
+    courseEntry.filterByCredits = () => {
+        if (creditFilter.isAtFullRange()) {
+            courseEntry.clearFilter('credit');
+        } else {
+            courseEntry.filter(course => creditFilter.matches(course.getElement()), 'credit');
+        }
+
+        creditFilter.refresh();
     };
 
     courseEntry.startDisplayMode = code => {
@@ -1646,10 +1672,213 @@ const shareLink = (() => {
 //  populate builds brand new .course-entry elements with no filter-hide classes on them,
 //  so after any repopulation every filter has to run again or the controls will show a
 //  filter as active while the list plainly ignores it.
+const creditFilter = (() => {
+    const storageKey = 'credit-filter';
+
+    const metrics = [
+        {key: 'cr', label: 'SU credit'},
+        {key: 'ects', label: 'ECTS'},
+        {key: 'eng', label: 'Engineering'},
+        {key: 'bsc', label: 'Basic Science'}
+    ];
+
+    //  bounds[key] = {max, raw}. max is where the slider ends, raw is the largest value
+    //  in the data; when they differ the top handle means "and above".
+    let bounds = {};
+    let state = {};
+
+    const defaultState = () => {
+        const fresh = {showUnknown: true};
+
+        metrics.forEach(metric => fresh[metric.key] = [0, bounds[metric.key].max]);
+
+        return fresh;
+    };
+
+    //  A slider needs a usable ceiling, and neither extreme works on its own. Hardcoding
+    //  it from the undergraduate catalog would cap ECTS at 7 and quietly drop every
+    //  graduate course; using the raw maximum would set ECTS to 180, because thesis
+    //  courses carry that, squeezing 91% of courses into the first few pixels.
+    //
+    //  So: take the smallest value covering 90% of courses, and trim to it only when the
+    //  raw maximum is both more than twice that AND large in absolute terms. The absolute
+    //  guard matters - once missing engineering and basic science credits are stored as 0,
+    //  those metrics are 79% zeros and the 90% mark collapses to 2, which would have
+    //  trimmed a 0-7 range down to 0-2 and pushed MATH 101 (basic 6) into the open bucket.
+    //  Below about a dozen steps a linear slider reads fine, so nothing there is trimmed.
+    const SLIDER_LIMIT = 12;
+
+    const deriveBound = values => {
+        if (values.length === 0) {
+            return {max: 0, raw: 0};
+        }
+
+        const sorted = values.slice(0).sort((left, right) => left - right);
+        const raw = sorted[sorted.length - 1];
+        const cover = sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.9) - 1)];
+
+        return {max: raw > cover * 2 && raw > SLIDER_LIMIT ? cover : raw, raw};
+    };
+
+    const readValues = key => $('.course-entry').toArray()
+        .map(element => $(element).attr(`data-${key}`))
+        .filter(value => value !== '' && value !== undefined)
+        .map(Number);
+
+    const countUnknown = () => $('.course-entry').toArray()
+        .filter(element => metrics.some(metric => $(element).attr(`data-${metric.key}`) === '')).length;
+
+    const clampState = () => {
+        metrics.forEach(metric => {
+            const limit = bounds[metric.key].max;
+            const range = state[metric.key] || [0, limit];
+
+            let [low, high] = range.map(Number);
+
+            low = Math.min(Math.max(low, 0), limit);
+            high = Math.min(Math.max(high, 0), limit);
+
+            state[metric.key] = [Math.min(low, high), Math.max(low, high)];
+        });
+
+        state.showUnknown = state.showUnknown !== false;
+    };
+
+    const save = () => localStorage.setItem(storageKey, JSON.stringify(state));
+
+    const isAtFullRange = () => state.showUnknown &&
+        metrics.every(metric => state[metric.key][0] === 0 && state[metric.key][1] === bounds[metric.key].max);
+
+    const activeCount = () => metrics
+        .filter(metric => state[metric.key][0] !== 0 || state[metric.key][1] !== bounds[metric.key].max).length;
+
+    //  Only the labels and the status line. Rebuilding the inputs here would pull the
+    //  element out from under a drag in progress, which breaks the slider mid-gesture.
+    const refresh = () => {
+        metrics.forEach(metric => {
+            const [low, high] = state[metric.key];
+            const bound = bounds[metric.key];
+
+            $(`.credit-metric[data-metric="${metric.key}"] .credit-metric-value`)
+                .text(`${low} \u2013 ${high}${high >= bound.max && bound.raw > bound.max ? '+' : ''}`);
+        });
+
+        const active = activeCount();
+        const hidden = $('.course-entry.filter-hide-credit').length;
+
+        $('#credit-filter').toggleClass('narrowed', !isAtFullRange());
+
+        //  Both halves are labelled: a bare count reads as noise, and the whole point of
+        //  this line is telling someone why their course list looks short.
+        const parts = [];
+
+        if (active > 0) {
+            parts.push(`${active} range${active === 1 ? '' : 's'}`);
+        }
+
+        if (hidden > 0) {
+            parts.push(`${hidden} hidden`);
+        }
+
+        if (parts.length === 0 && !state.showUnknown) {
+            parts.push('no-data hidden');
+        }
+
+        $('#credit-filter-status')
+            .text(isAtFullRange() ? '' : parts.join(' \u00b7 '))
+            .attr('title', isAtFullRange()
+                ? ''
+                : `${active} of ${metrics.length} credit ranges narrowed, hiding ${hidden} course${hidden === 1 ? '' : 's'}`);
+    };
+
+    //  The full rebuild, only where the inputs themselves have to change: new bounds
+    //  after a term switch, or a reset.
+    const render = () => {
+        $('#credit-filter-metrics').html(metrics.map(metric =>
+            templateGenerator.makeCreditMetric(metric, bounds[metric.key], state[metric.key])).join(''));
+
+        $('#credit-filter-unknown').prop('checked', state.showUnknown);
+
+        const unknown = countUnknown();
+
+        $('#credit-filter-missing').text(unknown > 0
+            ? `${unknown} course${unknown === 1 ? '' : 's'} have no catalog data for these metrics.`
+            : '');
+
+        refresh();
+    };
+
+    //  Called after every repopulation: another term can have a different ceiling, and a
+    //  selection saved under the old one has to be pulled inside the new one or the list
+    //  comes back empty with no visible reason.
+    const recalculate = () => {
+        metrics.forEach(metric => bounds[metric.key] = deriveBound(readValues(metric.key)));
+
+        try {
+            state = JSON.parse(localStorage.getItem(storageKey)) || defaultState();
+        } catch (error) {
+            state = defaultState();
+        }
+
+        clampState();
+        save();
+        render();
+    };
+
+    const setRange = (key, low, high) => {
+        state[key] = [Number(low), Number(high)];
+
+        clampState();
+        save();
+    };
+
+    const setShowUnknown = value => {
+        state.showUnknown = value;
+
+        save();
+    };
+
+    const reset = () => {
+        state = defaultState();
+
+        save();
+        render();
+    };
+
+    //  == null and never a truthy test: 0 is a stated zero, null is the catalog saying
+    //  nothing. `null >= 0` is true in JS, so a naive range check silently keeps them.
+    const matches = element => {
+        const $entry = $(element);
+
+        return metrics.every(metric => {
+            const raw = $entry.attr(`data-${metric.key}`);
+
+            if (raw === '' || raw === undefined) {
+                return state.showUnknown;
+            }
+
+            const value = Number(raw);
+            const [low, high] = state[metric.key];
+
+            //  The top handle is open ended wherever the slider was trimmed, so a 180 ECTS
+            //  dissertation is never excluded just for sitting past the end of the track.
+            return value >= low && (high >= bounds[metric.key].max ? true : value <= high);
+        });
+    };
+
+    const getBounds = () => bounds;
+
+    const getState = () => state;
+
+    return {metrics, recalculate, render, refresh, setRange, setShowUnknown, reset, isAtFullRange, matches, getBounds, getState};
+})();
+
 const applyAllFilters = () => {
     sectionEntry.filterByDays();
 
     courseEntry.filterByLevel();
+
+    courseEntry.filterByCredits();
 
     sectionEntry.filterByConflicts();
 
@@ -1677,6 +1906,10 @@ const switchTerm = term => {
         scenarios.loadForActiveTerm();
         scenarios.renderTabs();
         scenarios.switchTo(scenarios.getActiveIndex());
+
+        //  Before applyAllFilters: the new term can have a different ceiling and the saved
+        //  selection has to be clamped into it first.
+        creditFilter.recalculate();
 
         applyAllFilters();
     });
@@ -1787,6 +2020,40 @@ const normalizeSearchParam = (query) => {
     $('#search-box').on('input', searchParameterChange);
 
     $('#term-select').on('change', event => switchTerm($(event.currentTarget).val()));
+
+    $(document).on('click', '#credit-filter-header', () => $('#credit-filter').toggleClass('open'));
+
+    //  Two inputs stand for one range, so they have to be stopped from crossing by hand -
+    //  the browser will happily let the minimum run past the maximum.
+    $(document).on('input', '.credit-metric input', event => {
+        const $metric = $(event.currentTarget).closest('.credit-metric');
+        const $min = $metric.find('.credit-min');
+        const $max = $metric.find('.credit-max');
+
+        if (Number($min.val()) > Number($max.val())) {
+            $(event.currentTarget).hasClass('credit-min')
+                ? $max.val($min.val())
+                : $min.val($max.val());
+        }
+
+        creditFilter.setRange($metric.data('metric'), $min.val(), $max.val());
+
+        courseEntry.filterByCredits();
+    });
+
+    $(document).on('input', '#credit-filter-unknown', event => {
+        creditFilter.setShowUnknown($(event.currentTarget).is(':checked'));
+
+        courseEntry.filterByCredits();
+    });
+
+    $(document).on('click', '#credit-filter-reset', event => {
+        event.stopPropagation();
+
+        creditFilter.reset();
+
+        courseEntry.filterByCredits();
+    });
 
     $('#menu-toggle').on('click', () => $('body').toggleClass('hide-menu'));
 

@@ -22,7 +22,7 @@
     <link rel="stylesheet" href="font/animation.min.css">
     <link rel="stylesheet" href="font/fontello.min.css">
     <link rel="stylesheet" href="css/jquery.modal.min.css">
-    <link rel="stylesheet" href="css/suchedule.min.css">
+    <link rel="stylesheet" href="css/suchedule.min.css?v=d075f10d">
     <link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
     <link rel="icon" href="favicon.ico" type="image/x-icon"/>
     <link rel="shortcut icon" href="favicon.ico" type="image/x-icon"/>
@@ -75,6 +75,22 @@
             <label for="level-filter-ug">UG</label>
             <input id="level-filter-grad" name="level-filter" type="radio" value="grad">
             <label for="level-filter-grad">Grad</label>
+        </div>
+    </div>
+    <div id="credit-filter" class="menu-item">
+        <div id="credit-filter-header">
+            <div id="credit-filter-label"></div>
+            <div id="credit-filter-status"></div>
+            <div id="credit-filter-caret" class="icon-down-open-big"></div>
+        </div>
+        <div id="credit-filter-panel">
+            <div id="credit-filter-metrics"></div>
+            <label id="credit-filter-unknown-row">
+                <input id="credit-filter-unknown" type="checkbox" checked>
+                <span>Also show courses with no catalog data</span>
+            </label>
+            <div id="credit-filter-missing"></div>
+            <div id="credit-filter-reset" class="button">Reset</div>
         </div>
     </div>
     <div id="conflict-filter" class="menu-item">
@@ -204,7 +220,8 @@
             <p><a class="market-link" href="https://github.com/azizebil/suchedule" target="_blank"
                   rel="noopener">github.com/azizebil/suchedule</a></p>
             <p>Credit information (SU, ECTS, Engineering, Basic Science) is scraped automatically
-                from the Banner course catalog. The university's official course catalog is the
+                from the Banner course catalog and the university course pages. Where neither
+                states an engineering or basic science credit, it is shown as zero. The university's official course catalog is the
                 authoritative source &mdash; please confirm with your advisor before making
                 graduation decisions based on these numbers.</p>
             <p>Feel free to contact me about your suggestions:</p>
@@ -345,6 +362,6 @@
 <script src="js/jquery-3.3.1.min.js"></script>
 <script src="js/jquery.modal.min.js"></script>
 <script src="js/clipboard.min.js"></script>
-<script src="js/suchedule.min.js"></script>
+<script src="js/suchedule.min.js?v=bd0f2660"></script>
 </body>
 </html>

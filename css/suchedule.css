@@ -327,7 +327,9 @@ input[name=level-filter]:checked + label {
 #course-list {
     display: flex;
     flex-direction: column;
-    min-height: 500px;
+    /*  Was 500px, which stopped the list shrinking and pushed it out of the menu once
+        the credit panel opened. It scrolls internally, so a small floor is enough.  */
+    min-height: 150px;
     position: relative;
     overflow-y: scroll;
     padding-top: 6px;
@@ -947,4 +949,122 @@ tr > td:first-child, th:first-child {
     margin-left: auto;
     font-size: 12px;
     opacity: 0.9;
+}
+
+/* Credit range filter */
+
+#credit-filter {
+    flex-direction: column;
+    color: white;
+}
+
+#credit-filter-header {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+#credit-filter-label {
+    flex: 1;
+}
+#credit-filter-label::after {
+    content: "Filter By Credit";
+}
+@media only screen and (max-width: 440px) {
+    #credit-filter-label::after {
+        content: "Credits";
+    }
+}
+
+#credit-filter-status {
+    font-size: 12px;
+    font-family: monospace;
+    color: #f2ad9f;
+    margin-right: 8px;
+}
+
+#credit-filter-caret {
+    transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+#credit-filter.open #credit-filter-caret {
+    transform: rotate(180deg);
+}
+
+/*  The dot marks a narrowed filter while the panel is shut, otherwise a range set
+    yesterday looks like an empty course list today with no visible cause.  */
+#credit-filter.narrowed #credit-filter-label::before {
+    content: '';
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background-color: #f2ad9f;
+    vertical-align: middle;
+}
+
+#credit-filter-panel {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+#credit-filter.open #credit-filter-panel {
+    max-height: 420px;
+}
+
+.credit-metric {
+    margin-top: 10px;
+}
+
+.credit-metric-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    font-family: monospace;
+}
+
+.credit-metric-value {
+    color: #93f8f0;
+}
+
+.credit-metric input[type=range] {
+    display: block;
+    width: 100%;
+    margin: 2px 0;
+    height: 14px;
+    accent-color: #4183c4;
+    cursor: pointer;
+}
+
+#credit-filter-unknown-row {
+    display: flex;
+    align-items: center;
+    margin-top: 12px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+}
+#credit-filter-unknown-row input {
+    margin: 0 8px 0 0;
+    accent-color: #4183c4;
+    cursor: pointer;
+}
+
+#credit-filter-missing {
+    margin-top: 6px;
+    font-size: 12px;
+    color: gray;
+}
+#credit-filter-missing:empty {
+    display: none;
+}
+
+#credit-filter-reset {
+    margin: 10px 0;
+    padding: 4px;
+    border: 1px solid currentColor;
+    text-align: center;
+    font-size: 13px;
+    user-select: none;
 }
