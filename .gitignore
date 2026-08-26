@@ -3,3 +3,5 @@ other
 node_modules
 .DS_Store
 __pycache__
+scraper/CS.jsonl
+scraper/compare_credits.py

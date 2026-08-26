@@ -137,6 +137,20 @@ class SUcheduleCourseScraper:
                     ects_credits, eng_credits, basic_credits = self.catalog_cache[course_code_key]
                 else:
                     ects_credits, eng_credits, basic_credits = self.get_catalog_details(catalog_url)
+
+                    #  The Banner catalog leaves the breakdown off some courses entirely,
+                    #  but the course page carries it - EE 48010 reads 4 / 2 there and
+                    #  nothing at all on the catalog page. Only asked when the catalog
+                    #  came back empty, so it costs one extra request per gap.
+                    if eng_credits is None and basic_credits is None:
+                        page_ects, page_eng, page_basic = self.get_coursepage_details(course_code_key)
+
+                        if page_eng is not None or page_basic is not None:
+                            eng_credits, basic_credits = page_eng, page_basic
+
+                        if ects_credits is None:
+                            ects_credits = page_ects
+
                     self.catalog_cache[course_code_key] = (ects_credits, eng_credits, basic_credits)
                     # Be polite to the server
                     time.sleep(0.1)
@@ -238,6 +252,69 @@ class SUcheduleCourseScraper:
         except Exception as error:
             print(f"Error parsing catalog {url}: {error}")
             return None, None, None
+
+    def get_coursepage_details(self, course_code: str):
+        """
+        Second source for the ECTS breakdown: the course page behind
+        sabanci_www.p_get_courses, which is a different system from the Banner catalog
+        and sometimes carries a breakdown the catalog omits.
+
+        Tries the undergraduate view first and the graduate view second, because the
+        level a course is listed under is not always what its number suggests.
+
+        Returns (ects, engineering, basic_science); each may be None.
+        """
+        match = re.match(r"^([A-Z]+)\s*(\w+)$", course_code.strip())
+
+        if match is None:
+            return None, None, None
+
+        subject, number = match.group(1), match.group(2)
+
+        for level in ("UG", "GR"):
+            url = (f"https://suis.sabanciuniv.edu/prod/sabanci_www.p_get_courses"
+                   f"?levl_code={level}&subj_code={subject}&crse_numb={number}&lang=eng")
+
+            try:
+                response = self.session.get(url, timeout=15)
+            except requests.RequestException as error:
+                print(f"Course page request failed for {course_code} [{level}]: {error}")
+
+                continue
+
+            if response.status_code != 200:
+                continue
+
+            try:
+                soup = BeautifulSoup(response.content, "html.parser")
+
+                for cell in soup.find_all("td"):
+                    text = " ".join(cell.get_text(" ", strip=True).split())
+
+                    if not re.search(r"\bECTS\b", text, re.IGNORECASE) or len(text) > 200:
+                        continue
+
+                    ects_match = re.search(r"([\d.]+)\s*ECTS", text, re.IGNORECASE)
+                    attribute_match = re.search(
+                        r"\(\s*ENGINEERING:([^/]*)/\s*BASIC:([^)]*)\)", text, re.IGNORECASE
+                    )
+
+                    def credit(raw):
+                        raw = raw.strip()
+
+                        return 0 if raw == "" else self.to_number(raw)
+
+                    return (
+                        self.to_number(ects_match.group(1)) if ects_match else None,
+                        credit(attribute_match.group(1)) if attribute_match else None,
+                        credit(attribute_match.group(2)) if attribute_match else None,
+                    )
+            except Exception as error:
+                print(f"Error parsing course page for {course_code} [{level}]: {error}")
+
+            time.sleep(0.1)
+
+        return None, None, None
 
     def set_course_informations(self, course_informations: List[Dict]) -> List[Dict]:
         """
@@ -469,6 +546,17 @@ class SUcheduleCourseScraper:
         """
         Write json file.
         """
+        #  Applied here, at the very end, so the two sources upstream keep working with a
+        #  real "not stated" and the fallback is never mistaken for a value. Anything still
+        #  missing after both the Banner catalog and the course page means the university
+        #  publishes no engineering / basic science credit for that course, which in
+        #  practice is zero - those credits only count toward undergraduate accreditation.
+        #  ECTS is deliberately left alone: a zero ECTS would be wrong, not merely unknown.
+        for course in courses:
+            for key in ("eng", "bsc"):
+                if course.get(key) is None:
+                    course[key] = 0
+
         data = {"courses": courses,
                 "instructors": instructors,
                 "places": places}
