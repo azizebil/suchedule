@@ -1010,7 +1010,7 @@ tr > td:first-child, th:first-child {
     transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 #credit-filter.open #credit-filter-panel {
-    max-height: 420px;
+    max-height: 540px;
 }
 
 .credit-metric {
@@ -1056,8 +1056,30 @@ tr > td:first-child, th:first-child {
     font-size: 12px;
     color: gray;
 }
-#credit-filter-missing:empty {
-    display: none;
+
+#credit-filter-missing-summary {
+    cursor: pointer;
+    user-select: none;
+    text-decoration: underline dotted;
+}
+#credit-filter-missing-summary::after {
+    content: ' \25be';
+}
+#credit-filter-missing.open #credit-filter-missing-summary::after {
+    content: ' \25b4';
+}
+
+#credit-filter-missing-list {
+    max-height: 0;
+    overflow: hidden;
+    font-family: monospace;
+    color: #93f8f0;
+    transition: max-height 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+#credit-filter-missing.open #credit-filter-missing-list {
+    max-height: 110px;
+    overflow-y: auto;
+    margin-top: 4px;
 }
 
 #credit-filter-reset {

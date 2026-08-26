@@ -22,7 +22,7 @@
     <link rel="stylesheet" href="font/animation.min.css">
     <link rel="stylesheet" href="font/fontello.min.css">
     <link rel="stylesheet" href="css/jquery.modal.min.css">
-    <link rel="stylesheet" href="css/suchedule.min.css?v=d075f10d">
+    <link rel="stylesheet" href="css/suchedule.min.css?v=1d5e8294">
     <link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
     <link rel="icon" href="favicon.ico" type="image/x-icon"/>
     <link rel="shortcut icon" href="favicon.ico" type="image/x-icon"/>
@@ -89,7 +89,10 @@
                 <input id="credit-filter-unknown" type="checkbox" checked>
                 <span>Also show courses with no catalog data</span>
             </label>
-            <div id="credit-filter-missing"></div>
+            <div id="credit-filter-missing" style="display: none;">
+                <div id="credit-filter-missing-summary"></div>
+                <div id="credit-filter-missing-list"></div>
+            </div>
             <div id="credit-filter-reset" class="button">Reset</div>
         </div>
     </div>
@@ -362,6 +365,6 @@
 <script src="js/jquery-3.3.1.min.js"></script>
 <script src="js/jquery.modal.min.js"></script>
 <script src="js/clipboard.min.js"></script>
-<script src="js/suchedule.min.js?v=bd0f2660"></script>
+<script src="js/suchedule.min.js?v=5e5ec09e"></script>
 </body>
 </html>

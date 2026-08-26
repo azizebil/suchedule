@@ -1725,8 +1725,9 @@ const creditFilter = (() => {
         .filter(value => value !== '' && value !== undefined)
         .map(Number);
 
-    const countUnknown = () => $('.course-entry').toArray()
-        .filter(element => metrics.some(metric => $(element).attr(`data-${metric.key}`) === '')).length;
+    const unknownCourses = () => $('.course-entry').toArray()
+        .filter(element => metrics.some(metric => $(element).attr(`data-${metric.key}`) === ''))
+        .map(element => $(element).data('code'));
 
     const clampState = () => {
         metrics.forEach(metric => {
@@ -1749,9 +1750,6 @@ const creditFilter = (() => {
     const isAtFullRange = () => state.showUnknown &&
         metrics.every(metric => state[metric.key][0] === 0 && state[metric.key][1] === bounds[metric.key].max);
 
-    const activeCount = () => metrics
-        .filter(metric => state[metric.key][0] !== 0 || state[metric.key][1] !== bounds[metric.key].max).length;
-
     //  Only the labels and the status line. Rebuilding the inputs here would pull the
     //  element out from under a drag in progress, which breaks the slider mid-gesture.
     const refresh = () => {
@@ -1763,32 +1761,15 @@ const creditFilter = (() => {
                 .text(`${low} \u2013 ${high}${high >= bound.max && bound.raw > bound.max ? '+' : ''}`);
         });
 
-        const active = activeCount();
-        const hidden = $('.course-entry.filter-hide-credit').length;
+        const remaining = $('.course-entry:not([class*=filter-hide-])').length;
 
         $('#credit-filter').toggleClass('narrowed', !isAtFullRange());
 
-        //  Both halves are labelled: a bare count reads as noise, and the whole point of
-        //  this line is telling someone why their course list looks short.
-        const parts = [];
-
-        if (active > 0) {
-            parts.push(`${active} range${active === 1 ? '' : 's'}`);
-        }
-
-        if (hidden > 0) {
-            parts.push(`${hidden} hidden`);
-        }
-
-        if (parts.length === 0 && !state.showUnknown) {
-            parts.push('no-data hidden');
-        }
-
+        //  What is left, not what was removed: the question someone actually has while
+        //  dragging a slider is how many courses they are still looking at.
         $('#credit-filter-status')
-            .text(isAtFullRange() ? '' : parts.join(' \u00b7 '))
-            .attr('title', isAtFullRange()
-                ? ''
-                : `${active} of ${metrics.length} credit ranges narrowed, hiding ${hidden} course${hidden === 1 ? '' : 's'}`);
+            .text(isAtFullRange() ? '' : `${remaining} course${remaining === 1 ? '' : 's'}`)
+            .attr('title', isAtFullRange() ? '' : 'Courses still shown with every filter applied');
     };
 
     //  The full rebuild, only where the inputs themselves have to change: new bounds
@@ -1799,11 +1780,17 @@ const creditFilter = (() => {
 
         $('#credit-filter-unknown').prop('checked', state.showUnknown);
 
-        const unknown = countUnknown();
+        const unknown = unknownCourses();
 
-        $('#credit-filter-missing').text(unknown > 0
-            ? `${unknown} course${unknown === 1 ? '' : 's'} have no catalog data for these metrics.`
-            : '');
+        //  Naming them matters: "2 courses have no catalog data" invites exactly one
+        //  question, and the answer is a click away rather than a support conversation.
+        $('#credit-filter-missing')
+            .toggle(unknown.length > 0)
+            .removeClass('open')
+            .find('#credit-filter-missing-summary')
+            .text(`${unknown.length} course${unknown.length === 1 ? '' : 's'} with no catalog data`);
+
+        $('#credit-filter-missing-list').text(unknown.join(', '));
 
         refresh();
     };
@@ -2045,6 +2032,10 @@ const normalizeSearchParam = (query) => {
         creditFilter.setShowUnknown($(event.currentTarget).is(':checked'));
 
         courseEntry.filterByCredits();
+    });
+
+    $(document).on('click', '#credit-filter-missing-summary', () => {
+        $('#credit-filter-missing').toggleClass('open');
     });
 
     $(document).on('click', '#credit-filter-reset', event => {
