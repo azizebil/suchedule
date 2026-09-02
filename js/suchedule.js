@@ -14,10 +14,12 @@ const terms = (() => {
 
     let list = [];
 
+    const getSeason = term => seasons[term.slice(4)] || term.slice(4);
+
     const getLabel = term => {
         const year = Number(term.slice(0, 4));
 
-        return `${year}-${year + 1} ${seasons[term.slice(4)] || term.slice(4)}`;
+        return `${year}-${year + 1} ${getSeason(term)}`;
     };
 
     const setList = value => list = value;
@@ -39,7 +41,7 @@ const terms = (() => {
 
     const setActive = term => localStorage.setItem('active-term', term);
 
-    const dataFile = term => `data-${term}-v${getVersion(term)}.min.json`;
+    const dataFile = term => `data/data-${term}-v${getVersion(term)}.min.json`;
 
     const cacheKey = term => `course-data-${term}-${getVersion(term)}`;
 
@@ -52,7 +54,8 @@ const terms = (() => {
 
         Object.keys(localStorage).forEach(key => {
             if (key.indexOf('course-data-') === 0) {
-                if (validCaches.indexOf(key) > -1) {
+                //  The cache order list shares the prefix but is not a cache itself.
+                if (key === 'course-data-lru' || validCaches.indexOf(key) > -1) {
                     return;
                 }
 
@@ -84,10 +87,22 @@ const terms = (() => {
         return outdated;
     };
 
+    //  Nine flat rows are hard to scan, so they are grouped by academic year with the
+    //  season alone on each row - the year is already the group heading.
     const renderSelect = () => {
-        $('#term-select').html(
-            list.map(entry => templateGenerator.makeTermOption(entry.term, getLabel(entry.term))).join('')
-        ).val(getActive());
+        const groups = [];
+
+        list.forEach(entry => {
+            const year = entry.term.slice(0, 4);
+            const group = groups.find(candidate => candidate.year === year);
+
+            (group || groups[groups.push({year, terms: []}) - 1]).terms.push(entry.term);
+        });
+
+        $('#term-select').html(groups.map(group => templateGenerator.makeTermGroup(
+            `${group.year}-${Number(group.year) + 1}`,
+            group.terms.map(term => templateGenerator.makeTermOption(term, getSeason(term))).join('')
+        )).join('')).val(getActive());
     };
 
     const updateNotice = () => {
@@ -99,25 +114,59 @@ const terms = (() => {
     };
 
     return {
-        getLabel, setList, getList, getCurrent, has, getVersion, getActive, setActive,
+        getLabel, getSeason, setList, getList, getCurrent, has, getVersion, getActive, setActive,
         dataFile, cacheKey, clearOutdated, renderSelect, updateNotice
     };
 })();
 
 const courseData = (() => {
+    //  Nine terms cached at once would be roughly 1.6 MB of text, and localStorage counts
+    //  UTF-16, so about 3.2 MB against a typical 5 MB quota - close enough to hurt. Only
+    //  the two most recently used terms are kept; the rest come back over HTTP, where the
+    //  browser's own cache already serves them from a static host at no real cost.
+    const KEEP = 2;
+
+    const recentKey = 'course-data-lru';
+
+    const readRecent = () => {
+        try {
+            const stored = JSON.parse(localStorage.getItem(recentKey));
+
+            return Array.isArray(stored) ? stored : [];
+        } catch (error) {
+            return [];
+        }
+    };
+
+    const touch = term => {
+        const recent = [term].concat(readRecent().filter(entry => entry !== term));
+
+        //  Anything past the limit loses its cache, and so does any cache whose term is
+        //  no longer in the list at all.
+        recent.slice(KEEP).forEach(stale => localStorage.removeItem(terms.cacheKey(stale)));
+
+        localStorage.setItem(recentKey, JSON.stringify(recent.slice(0, KEEP)));
+    };
+
     const load = term => {
         const cached = localStorage.getItem(terms.cacheKey(term));
 
         if (cached !== null) {
+            touch(term);
+
             return $.Deferred().resolve(JSON.parse(cached)).promise();
         }
 
         return $.getJSON(terms.dataFile(term)).then(data => {
             try {
+                //  Evict first: writing then trimming would need the quota for both at once.
+                touch(term);
+
                 localStorage.setItem(terms.cacheKey(term), JSON.stringify(data));
             } catch (error) {
-                //  Two terms of data sit well inside the usual 5 MB, but a full quota
-                //  throws rather than failing quietly, and it must not break the load.
+                //  A full quota throws rather than failing quietly. The term still loads,
+                //  it just gets fetched again next time instead of breaking the page.
+                localStorage.removeItem(terms.cacheKey(term));
             }
 
             return data;
@@ -231,6 +280,8 @@ const templateGenerator = (() => {
 
     const makeTermOption = (term, label) => `<option value="${term}">${label}</option>`;
 
+    const makeTermGroup = (label, options) => `<optgroup label="${label}">${options}</optgroup>`;
+
     //  Two plain range inputs rather than a dual-handle widget: the browser has no such
     //  control and pulling in a slider library would put back the CDN dependency we removed.
     const makeCreditMetric = (metric, bound, range) => `
@@ -239,10 +290,14 @@ const templateGenerator = (() => {
                 <span>${metric.label}</span>
                 <span class="credit-metric-value">${range[0]} &ndash; ${range[1]}${range[1] >= bound.max && bound.raw > bound.max ? '+' : ''}</span>
             </div>
-            <input class="credit-min" type="range" min="0" max="${bound.max}" value="${range[0]}"
-                   title="${metric.label} minimum">
-            <input class="credit-max" type="range" min="0" max="${bound.max}" value="${range[1]}"
-                   title="${metric.label} maximum">
+            <div class="credit-slider">
+                <div class="credit-track"></div>
+                <div class="credit-fill"></div>
+                <input class="credit-min" type="range" min="0" max="${bound.max}" value="${range[0]}"
+                       title="${metric.label} minimum">
+                <input class="credit-max" type="range" min="0" max="${bound.max}" value="${range[1]}"
+                       title="${metric.label} maximum">
+            </div>
         </div>
     `;
 
@@ -265,7 +320,8 @@ const templateGenerator = (() => {
         makeCreditMetric,
         makeScenarioTab,
         makeScenarioAddButton,
-        makeTermOption
+        makeTermOption,
+        makeTermGroup
     };
 })();
 
@@ -852,14 +908,21 @@ const courseEntry = (() => {
 
     courseEntry.clearFilter = filterName => {
         $('.course-entry').removeClass(`filter-hide-${filterName}`);
+
+        creditFilter.refresh();
     };
 
+    //  Refreshed here rather than only from the credit panel, so the count reacts to the
+    //  level filter, the search box and the conflict filter as well - every one of them
+    //  ends up adding or removing a filter-hide class through this function.
     courseEntry.filter = (filter, filterName) => {
         $('.course-entry').each((i, course) => {
             course = courseEntry($(course));
 
             filter(course) ? course.removeFilter(filterName) : course.addFilter(filterName);
         });
+
+        creditFilter.refresh();
     };
 
     courseEntry.filterIfAnyEmptySection = () => {
@@ -1753,23 +1816,41 @@ const creditFilter = (() => {
     //  Only the labels and the status line. Rebuilding the inputs here would pull the
     //  element out from under a drag in progress, which breaks the slider mid-gesture.
     const refresh = () => {
+        //  Guards the calls that come from the filter pipeline during boot, before
+        //  recalculate has had a term to measure.
+        if (metrics.some(metric => bounds[metric.key] === undefined || state[metric.key] === undefined)) {
+            return;
+        }
+
         metrics.forEach(metric => {
             const [low, high] = state[metric.key];
             const bound = bounds[metric.key];
+            const $metric = $(`.credit-metric[data-metric="${metric.key}"]`);
 
-            $(`.credit-metric[data-metric="${metric.key}"] .credit-metric-value`)
+            $metric.find('.credit-metric-value')
                 .text(`${low} \u2013 ${high}${high >= bound.max && bound.raw > bound.max ? '+' : ''}`);
+
+            const span = bound.max || 1;
+
+            $metric.find('.credit-fill').css({
+                left: `${(low / span) * 100}%`,
+                right: `${100 - (high / span) * 100}%`
+            });
+
+            //  With both thumbs pinned to the same end the upper one would sit on top and
+            //  swallow the drag, leaving the range stuck. Lift the lower one out at the top.
+            $metric.toggleClass('min-on-top', low >= bound.max);
         });
 
         const remaining = $('.course-entry:not([class*=filter-hide-])').length;
 
         $('#credit-filter').toggleClass('narrowed', !isAtFullRange());
 
-        //  What is left, not what was removed: the question someone actually has while
-        //  dragging a slider is how many courses they are still looking at.
+        //  Always shown, filtered or not: the count answers "how much is left" whether or
+        //  not this particular panel is what narrowed it, and every filter feeds into it.
         $('#credit-filter-status')
-            .text(isAtFullRange() ? '' : `${remaining} course${remaining === 1 ? '' : 's'}`)
-            .attr('title', isAtFullRange() ? '' : 'Courses still shown with every filter applied');
+            .text(`${remaining} course${remaining === 1 ? '' : 's'}`)
+            .attr('title', 'Courses still shown with every filter applied');
     };
 
     //  The full rebuild, only where the inputs themselves have to change: new bounds

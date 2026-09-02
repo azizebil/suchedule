@@ -55,8 +55,14 @@ jobs:
 
           echo "::group::Folding the scrape into terms.json"
           # update_terms.py bumps only this term's version, removes only this term's old
-          # data file, and drops the oldest term once the list grows past two.
+          # data file, and drops the oldest term once the list grows past nine.
           python scraper/update_terms.py "$CURRENT_TERM" data.min.json | tee /tmp/update_terms.out
+          echo "::endgroup::"
+
+          echo "::group::Rebuilding the offerings index"
+          # Which terms each course was opened in, compiled here so the page never has to
+          # download every term file to answer it.
+          python scraper/build_offerings.py
           echo "::endgroup::"
 
           echo "::group::Result"

@@ -923,14 +923,18 @@ tr > td:first-child, th:first-child {
     color: #173A6A;
 }
 
+/*  Was #6EA4BF, the same colour as the table's header row directly below it, so the bar
+    dissolved into the table and white text on it measured 2.7:1 against a 4.5:1 minimum.
+    The menu's navy reads as chrome rather than as another table row: 17.9:1 for the
+    labels, 14.5:1 for the figures, and 6.6:1 against the header row underneath.  */
 #credit-total {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     flex-shrink: 0;
     min-width: 800px;
-    padding: 5px 10px 5px 40px;
-    background-color: #6EA4BF;
+    padding: 6px 10px 6px 40px;
+    background-color: #031926;
     color: white;
     font-family: monospace;
     font-size: 14px;
@@ -940,15 +944,16 @@ tr > td:first-child, th:first-child {
 }
 #credit-total b {
     font-size: 15px;
+    color: #93f8f0;
 }
 .credit-total-label {
     text-transform: uppercase;
-    opacity: 0.85;
+    opacity: 0.7;
 }
 .credit-total-note {
     margin-left: auto;
     font-size: 12px;
-    opacity: 0.9;
+    color: #f2ad9f;
 }
 
 /* Credit range filter */
@@ -1028,13 +1033,95 @@ tr > td:first-child, th:first-child {
     color: #93f8f0;
 }
 
+/*  One track, two thumbs. The browser has no dual-handle range input and a slider
+    library would bring back the CDN dependency we removed, so two plain inputs are
+    stacked on the same track: the input itself ignores the pointer and only its thumb
+    accepts it, which keeps each handle draggable without either one covering the other. */
+.credit-slider {
+    position: relative;
+    height: 22px;
+    margin-top: 4px;
+}
+
+.credit-track,
+.credit-fill {
+    position: absolute;
+    top: 9px;
+    height: 4px;
+    border-radius: 2px;
+}
+
+.credit-track {
+    left: 0;
+    right: 0;
+    background-color: rgba(255, 255, 255, 0.25);
+}
+
+.credit-fill {
+    background-color: #4183c4;
+}
+
 .credit-metric input[type=range] {
-    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
     width: 100%;
-    margin: 2px 0;
-    height: 14px;
-    accent-color: #4183c4;
+    height: 22px;
+    margin: 0;
+    background: none;
+    pointer-events: none;
+    -webkit-appearance: none;
+    appearance: none;
+}
+.credit-metric input[type=range]:focus {
+    outline: none;
+}
+.credit-metric input[type=range]::-webkit-slider-runnable-track {
+    background: transparent;
+    border: none;
+}
+.credit-metric input[type=range]::-moz-range-track {
+    background: transparent;
+    border: none;
+}
+
+.credit-metric input[type=range]::-webkit-slider-thumb {
+    pointer-events: auto;
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: 3px;
+    border: 2px solid #031926;
+    border-radius: 50%;
+    background-color: white;
     cursor: pointer;
+}
+.credit-metric input[type=range]::-moz-range-thumb {
+    pointer-events: auto;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #031926;
+    border-radius: 50%;
+    background-color: white;
+    cursor: pointer;
+}
+
+.credit-metric input[type=range]:focus-visible::-webkit-slider-thumb {
+    border-color: #93f8f0;
+}
+.credit-metric input[type=range]:focus-visible::-moz-range-thumb {
+    border-color: #93f8f0;
+}
+
+.credit-min {
+    z-index: 2;
+}
+.credit-max {
+    z-index: 3;
+}
+.credit-metric.min-on-top .credit-min {
+    z-index: 4;
 }
 
 #credit-filter-unknown-row {

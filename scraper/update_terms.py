@@ -21,12 +21,13 @@ import os
 import subprocess
 import sys
 
-MAX_TERMS = 2
+MAX_TERMS = 9
 TERMS_FILE = "terms.json"
+DATA_DIR = "data"
 
 
 def data_file(term, version):
-    return f"data-{term}-v{version}.min.json"
+    return os.path.join(DATA_DIR, f"data-{term}-v{version}.min.json")
 
 
 def read_terms():
@@ -83,6 +84,7 @@ def main():
         next_version = 1
         terms.append({"term": term, "dataVersion": next_version})
 
+    os.makedirs(DATA_DIR, exist_ok=True)
     os.replace(scraped, data_file(term, next_version))
 
     #  Sorted rather than "put the scraped one first": the workflow always scrapes the
