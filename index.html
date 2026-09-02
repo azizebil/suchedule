@@ -22,7 +22,7 @@
     <link rel="stylesheet" href="font/animation.min.css">
     <link rel="stylesheet" href="font/fontello.min.css">
     <link rel="stylesheet" href="css/jquery.modal.min.css">
-    <link rel="stylesheet" href="css/suchedule.min.css?v=2fcfd6b9">
+    <link rel="stylesheet" href="css/suchedule.min.css?v=c67923ee">
     <link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
     <link rel="icon" href="favicon.ico" type="image/x-icon"/>
     <link rel="shortcut icon" href="favicon.ico" type="image/x-icon"/>
@@ -32,10 +32,11 @@
 <header>
     <div id="logo">SUchedule</div>
     <div id="about-button" class="icon-help button"></div>
-    <div id="clear-button" class="icon-trash button">Clear</div>
-    <div id="copy-button" class="icon-clipboard button">Copy Crn</div>
-    <div id="export-button" class="icon-calendar button">Calendar</div>
-    <div id="share-button" class="icon-link-ext-alt button">Share</div>
+    <div id="clear-button" class="icon-trash button" title="Clear this plan"><span class="button-label">Clear</span></div>
+    <div id="copy-button" class="icon-clipboard button" title="Copy the crn list"><span class="button-label">Copy Crn</span></div>
+    <div id="export-button" class="icon-calendar button" title="Export to a calendar"><span class="button-label">Calendar</span></div>
+    <div id="image-button" class="icon-down-open-big button" title="Download as an image"><span class="button-label">Image</span></div>
+    <div id="share-button" class="icon-link-ext-alt button" title="Copy a link to this plan"><span class="button-label">Share</span></div>
 </header>
 <div id="menu">
     <div id="menu-toggle" class="icon-menu button"></div>
@@ -293,6 +294,16 @@
             <p>Send it to a friend. Opening it will offer them this schedule.</p>
         </div>
     </div>
+    <div id="notify-image-empty" class="notification" style="display: none;">
+        <div class="notification-header">
+            <div class="notification-header-text">Nothing to Draw</div>
+            <div class="icon-cancel shake-on-hover button"></div>
+        </div>
+        <div class="notification-content">
+            <p>Add some courses to your schedule first.</p>
+        </div>
+        <div class="notification-button button">Alright</div>
+    </div>
     <div id="notify-share-empty" class="notification" style="display: none;">
         <div class="notification-header">
             <div class="notification-header-text">Nothing to Share</div>
@@ -356,6 +367,6 @@
 <script src="js/jquery-3.3.1.min.js"></script>
 <script src="js/jquery.modal.min.js"></script>
 <script src="js/clipboard.min.js"></script>
-<script src="js/suchedule.min.js?v=f706552e"></script>
+<script src="js/suchedule.min.js?v=7561c52a"></script>
 </body>
 </html>

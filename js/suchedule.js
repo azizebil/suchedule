@@ -1640,6 +1640,225 @@ const icsExport = (() => {
     return {escapeText, foldLine, collect, build, parseMonday, run};
 })();
 
+const scheduleImage = (() => {
+    //  Drawn onto a canvas from the schedule's own data rather than rasterising the DOM.
+    //  A screenshot library would mean another vendored dependency for something the app
+    //  already knows: which course sits on which day, for how long, in what colour.
+    const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
+    const HOUR_WIDTH = 74;
+    const DAY_WIDTH = 196;
+    const ROW_HEIGHT = 64;
+    const HEADER_HEIGHT = 44;
+    const TITLE_HEIGHT = 58;
+    const FOOTER_HEIGHT = 36;
+    //  Drawn at twice the size so the text stays sharp on a high density screen.
+    const SCALE = 2;
+
+    const font = weight => `${weight} ${13 * SCALE}px Roboto, Helvetica, Arial, sans-serif`;
+
+    const hourLabels = () => $('#schedule .hour-cell').toArray().map(cell => $(cell).text().trim());
+
+    //  One entry per class hour block, taken from the sections on the schedule so a two
+    //  hour course is a single rectangle rather than two stacked cells.
+    const blocks = () => {
+        const result = [];
+
+        cellCourses.getAllCrnDataToSave().forEach(crn => {
+            const section = sectionEntry(crn);
+
+            if (section.getElement().length === 0) {
+                return;
+            }
+
+            const colour = cellCourses.findByCrn(crn).getColor();
+
+            section.getScheduleData().forEach(schedule => {
+                if (schedule.start === -1 || schedule.day > 4) {
+                    return;
+                }
+
+                result.push({
+                    day: schedule.day,
+                    start: schedule.start,
+                    duration: schedule.duration,
+                    place: schedule.place || '',
+                    name: section.getName(),
+                    colour
+                });
+            });
+        });
+
+        return result;
+    };
+
+    const hours = (start, duration) => {
+        const from = start + 8;
+        const to = from + duration;
+
+        return `${from < 10 ? '0' : ''}${from}:40 - ${to < 10 ? '0' : ''}${to}:30`;
+    };
+
+    //  Canvas has no text clipping of its own, so anything too wide is cut with an ellipsis.
+    const fit = (context, text, width) => {
+        if (context.measureText(text).width <= width) {
+            return text;
+        }
+
+        let cut = text;
+
+        while (cut.length > 1 && context.measureText(`${cut}...`).width > width) {
+            cut = cut.slice(0, -1);
+        }
+
+        return `${cut}...`;
+    };
+
+    const render = () => {
+        const labels = hourLabels();
+        const width = HOUR_WIDTH + DAYS.length * DAY_WIDTH;
+        const height = TITLE_HEIGHT + HEADER_HEIGHT + labels.length * ROW_HEIGHT + FOOTER_HEIGHT;
+
+        const canvas = document.createElement('canvas');
+
+        canvas.width = width * SCALE;
+        canvas.height = height * SCALE;
+
+        const context = canvas.getContext('2d');
+
+        context.scale(SCALE, SCALE);
+        context.textBaseline = 'middle';
+
+        context.fillStyle = '#F0EDEE';
+        context.fillRect(0, 0, width, height);
+
+        //  Title bar
+        context.fillStyle = '#004288';
+        context.fillRect(0, 0, width, TITLE_HEIGHT);
+
+        context.fillStyle = 'white';
+        context.font = `bold ${20 * SCALE / SCALE}px Roboto, Helvetica, Arial, sans-serif`;
+        context.font = 'bold 20px Roboto, Helvetica, Arial, sans-serif';
+        context.fillText('SUchedule', 16, TITLE_HEIGHT / 2);
+
+        context.font = '14px Roboto, Helvetica, Arial, sans-serif';
+        context.textAlign = 'right';
+        context.fillText(`${terms.getLabel(terms.getActive())}  ·  ${scenarios.getActiveName()}`,
+            width - 16, TITLE_HEIGHT / 2);
+        context.textAlign = 'left';
+
+        //  Day header
+        const headerTop = TITLE_HEIGHT;
+
+        context.fillStyle = '#6EA4BF';
+        context.fillRect(0, headerTop, width, HEADER_HEIGHT);
+
+        context.fillStyle = 'white';
+        context.font = 'bold 15px Roboto, Helvetica, Arial, sans-serif';
+        context.textAlign = 'center';
+
+        DAYS.forEach((day, index) => {
+            context.fillText(day, HOUR_WIDTH + index * DAY_WIDTH + DAY_WIDTH / 2, headerTop + HEADER_HEIGHT / 2);
+        });
+
+        //  Hour rows
+        const gridTop = headerTop + HEADER_HEIGHT;
+
+        labels.forEach((label, row) => {
+            const top = gridTop + row * ROW_HEIGHT;
+
+            context.fillStyle = row % 2 === 0 ? 'rgba(0, 0, 0, 0.06)' : 'transparent';
+            context.fillRect(HOUR_WIDTH, top, width - HOUR_WIDTH, ROW_HEIGHT);
+
+            context.fillStyle = '#011627';
+            context.font = 'bold 13px Roboto, Helvetica, Arial, sans-serif';
+            context.fillText(label, HOUR_WIDTH / 2, top + ROW_HEIGHT / 2);
+        });
+
+        //  Grid lines
+        context.strokeStyle = 'rgba(0, 0, 0, 0.18)';
+        context.lineWidth = 1;
+
+        for (let column = 0; column <= DAYS.length; column++) {
+            const x = HOUR_WIDTH + column * DAY_WIDTH;
+
+            context.beginPath();
+            context.moveTo(x, headerTop);
+            context.lineTo(x, gridTop + labels.length * ROW_HEIGHT);
+            context.stroke();
+        }
+
+        for (let row = 0; row <= labels.length; row++) {
+            const y = gridTop + row * ROW_HEIGHT;
+
+            context.beginPath();
+            context.moveTo(0, y);
+            context.lineTo(width, y);
+            context.stroke();
+        }
+
+        //  Course blocks
+        context.textAlign = 'left';
+
+        blocks().forEach(block => {
+            const x = HOUR_WIDTH + block.day * DAY_WIDTH + 3;
+            const y = gridTop + block.start * ROW_HEIGHT + 3;
+            const blockWidth = DAY_WIDTH - 6;
+            const blockHeight = block.duration * ROW_HEIGHT - 6;
+
+            context.fillStyle = block.colour;
+            context.fillRect(x, y, blockWidth, blockHeight);
+
+            context.fillStyle = 'white';
+            context.font = 'bold 14px Roboto, Helvetica, Arial, sans-serif';
+            context.fillText(fit(context, block.name, blockWidth - 16), x + 8, y + 18);
+
+            context.font = '12px Roboto, Helvetica, Arial, sans-serif';
+            context.fillText(fit(context, hours(block.start, block.duration), blockWidth - 16), x + 8, y + 36);
+
+            if (block.place && blockHeight > 54) {
+                context.fillText(fit(context, block.place, blockWidth - 16), x + 8, y + 54);
+            }
+        });
+
+        //  Footer with the credit totals, when the panel has them
+        const totals = $('#credit-total').is(':visible')
+            ? $('#credit-total').text().replace(/\s+/g, ' ').trim()
+            : '';
+
+        context.fillStyle = '#031926';
+        context.fillRect(0, height - FOOTER_HEIGHT, width, FOOTER_HEIGHT);
+
+        context.fillStyle = 'white';
+        context.font = '12px Roboto, Helvetica, Arial, sans-serif';
+        context.fillText(fit(context, totals, width - 200), 16, height - FOOTER_HEIGHT / 2);
+
+        context.textAlign = 'right';
+        context.fillText('azizebil.github.io/suchedule', width - 16, height - FOOTER_HEIGHT / 2);
+
+        return canvas;
+    };
+
+    const download = () => {
+        render().toBlob(blob => {
+            const url = URL.createObjectURL(blob);
+            const $link = $('<a>').attr({
+                href: url,
+                download: `suchedule-${terms.getActive()}-${scenarios.getActiveName().replace(/\s+/g, '-')}.png`
+            });
+
+            $('body').append($link);
+
+            $link[0].click();
+            $link.remove();
+
+            URL.revokeObjectURL(url);
+        }, 'image/png');
+    };
+
+    return {render, download, blocks};
+})();
+
 const shareLink = (() => {
     const make = () => {
         const crns = cellCourses.getAllCrnDataToSave();
@@ -2192,6 +2411,16 @@ const normalizeSearchParam = (query) => {
     //  Pasting a share link while already on the site only changes the hash, so the page
     //  never reloads and populate never runs again.
     $(window).on('hashchange', () => shareLink.offerImport());
+
+    $(document).on('click', '#image-button', () => {
+        if (cellCourses.getAllCrnDataToSave().length === 0) {
+            $('#notify-image-empty').fadeIn(500);
+
+            return;
+        }
+
+        scheduleImage.download();
+    });
 
     $(document).on('click', '#export-button', () => {
         $('#export-message').text('');

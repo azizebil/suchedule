@@ -49,9 +49,25 @@ header .button {
     white-space: nowrap;
     margin-left: 10px;
 }
+/*  Six buttons and their labels no longer fit a phone: the row overflowed to the left
+    and pushed the logo and the help icon off the screen. Below 500px the icons stand on
+    their own, with the label kept in a title for anyone who hovers or reads it out.  */
 @media only screen and (max-width: 500px) {
     header .button {
-        font-size: 14px;
+        font-size: 20px;
+        margin-left: 12px;
+    }
+
+    header .button .button-label {
+        display: none;
+    }
+}
+
+/*  Under about 340px even the icons and the wordmark together do not fit, and the
+    wordmark is the part a visitor already knows.  */
+@media only screen and (max-width: 340px) {
+    #logo {
+        display: none;
     }
 }
 
