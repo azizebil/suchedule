@@ -2319,14 +2319,12 @@ const normalizeSearchParam = (query) => {
 
         return switchTerm(terms.getActive());
     }).then(() => shareLink.offerImport()).fail(() => {
-        //  Without terms.json there is no data file to fetch, so say so rather than
-        //  leaving the spinner turning forever.
+        //  Without terms.json there is no data file to fetch. Its own notification rather
+        //  than the shared-link one, whose heading reads "Link Not Usable" and would send
+        //  someone looking for a problem with a link they never opened.
         $('#course-list').removeClass('loading');
 
-        $('#notify-share-invalid .notification-content p')
-            .text('Course data could not be loaded. Please refresh the page.');
-
-        $('#notify-share-invalid').fadeIn(500);
+        $('#notify-load-failed').fadeIn(500);
     });
 })();
 
@@ -2338,6 +2336,8 @@ const normalizeSearchParam = (query) => {
     $(document).on('click', '#notify-share-import .notification-button', () => {
         shareLink.acceptImport();
     });
+
+    $(document).on('click', '#notify-load-failed .notification-button', () => location.reload());
 
     $(document).on('click', '#notify-close-plan .notification-button', () => {
         scenarios.confirmClose();
