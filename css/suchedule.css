@@ -413,6 +413,7 @@ input[name=level-filter]:checked + label {
     text-align: center;
 }
 
+
 .class-cell.interested {
     background-color: rgba(181, 247, 90, 0.5);
 }
@@ -509,6 +510,9 @@ input[name=level-filter]:checked + label {
 
 .cell-course {
     display: inline-block;
+    /*  Baseline aligned by default, which leaves room for descenders under the box and
+        made a filled row a few pixels taller than an empty one.  */
+    vertical-align: top;
     padding: 5px;
     margin: 2px;
     color: white;
@@ -520,8 +524,28 @@ input[name=level-filter]:checked + label {
     cursor: pointer;
 }
 
+.cell-course {
+    overflow: hidden;
+}
+
+/*  Two courses at the same hour used to stack and push that one row taller than the whole
+    grid. Capped at half the cell they sit side by side on one line instead, so the row
+    keeps the height every other row has.  */
+.class-cell .cell-course:not(:only-child) {
+    max-width: calc(50% - 6px);
+}
+
 .cell-course div {
     display: inline-block;
+}
+
+/*  The name gives way, never the remove button: clipping the whole box took the x with
+    it and left a course that could not be removed by clicking it.  */
+.cell-course div:first-child {
+    max-width: calc(100% - 22px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
 }
 
 .remove-course {
@@ -758,6 +782,14 @@ input[name=level-filter]:checked + label {
 tr:first-child {
     background-color: #6EA4BF;
     height: 30px;
+}
+
+/*  Every hour row asks for the same height, so the table shares the leftover space
+    evenly instead of in proportion to what each row happens to contain. Without this a
+    cell holding a course demands 34px while an empty one demands nothing, and adding a
+    single course pushed its rows from 72px to 89px while the empty ones fell to 52px.  */
+#schedule tr:not(:first-child) {
+    height: 38px;
 }
 
 .day-cell {
