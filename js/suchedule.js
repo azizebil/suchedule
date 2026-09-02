@@ -1689,7 +1689,62 @@ const scheduleImage = (() => {
             });
         });
 
-        return result;
+        return position(result);
+    };
+
+    //  Two courses at the same hour would otherwise be painted on top of each other and
+    //  the lower one would simply vanish from the picture. Overlapping blocks are grouped
+    //  per day and share the column between them, the way the table does on screen.
+    const position = all => {
+        const overlaps = (a, b) =>
+            a.start < b.start + b.duration && b.start < a.start + a.duration;
+
+        for (let day = 0; day <= 4; day++) {
+            const inDay = all.filter(block => block.day === day)
+                .sort((a, b) => a.start - b.start || a.duration - b.duration);
+
+            let cluster = [];
+            let clusterEnd = -1;
+
+            const settle = () => {
+                if (cluster.length === 0) {
+                    return;
+                }
+
+                const columns = [];
+
+                cluster.forEach(block => {
+                    //  First column with nothing running at the same time, a new one if none.
+                    let index = columns.findIndex(column =>
+                        column.every(other => !overlaps(block, other)));
+
+                    if (index === -1) {
+                        index = columns.push([]) - 1;
+                    }
+
+                    columns[index].push(block);
+                    block.column = index;
+                });
+
+                cluster.forEach(block => block.columns = columns.length);
+
+                cluster = [];
+                clusterEnd = -1;
+            };
+
+            inDay.forEach(block => {
+                if (cluster.length > 0 && block.start >= clusterEnd) {
+                    settle();
+                }
+
+                cluster.push(block);
+                clusterEnd = Math.max(clusterEnd, block.start + block.duration);
+            });
+
+            settle();
+        }
+
+        return all;
     };
 
     const hours = (start, duration) => {
@@ -1801,9 +1856,10 @@ const scheduleImage = (() => {
         context.textAlign = 'left';
 
         blocks().forEach(block => {
-            const x = HOUR_WIDTH + block.day * DAY_WIDTH + 3;
+            const share = DAY_WIDTH / block.columns;
+            const x = HOUR_WIDTH + block.day * DAY_WIDTH + block.column * share + 3;
             const y = gridTop + block.start * ROW_HEIGHT + 3;
-            const blockWidth = DAY_WIDTH - 6;
+            const blockWidth = share - 6;
             const blockHeight = block.duration * ROW_HEIGHT - 6;
 
             context.fillStyle = block.colour;
@@ -1818,16 +1874,16 @@ const scheduleImage = (() => {
             context.clip();
 
             context.fillStyle = 'white';
-            context.font = 'bold 14px Roboto, Helvetica, Arial, sans-serif';
-            context.fillText(fit(context, block.name, blockWidth - 16), x + 8, y + 17);
+            context.font = `bold ${block.columns > 1 ? 12 : 14}px Roboto, Helvetica, Arial, sans-serif`;
+            context.fillText(fit(context, block.name, blockWidth - 12), x + 6, y + 17);
 
-            context.font = '12px Roboto, Helvetica, Arial, sans-serif';
-            context.fillText(fit(context, hours(block.start, block.duration), blockWidth - 16), x + 8, y + 33);
+            context.font = `${block.columns > 1 ? 10 : 12}px Roboto, Helvetica, Arial, sans-serif`;
+            context.fillText(fit(context, hours(block.start, block.duration), blockWidth - 12), x + 6, y + 33);
 
             //  Three lines need 55px of the 58px a one hour block gives; anything shorter
             //  drops the room rather than showing half of it.
             if (block.place && blockHeight >= 56) {
-                context.fillText(fit(context, block.place, blockWidth - 16), x + 8, y + 49);
+                context.fillText(fit(context, block.place, blockWidth - 12), x + 6, y + 49);
             }
 
             context.restore();
