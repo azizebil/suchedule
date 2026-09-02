@@ -1809,16 +1809,28 @@ const scheduleImage = (() => {
             context.fillStyle = block.colour;
             context.fillRect(x, y, blockWidth, blockHeight);
 
+            //  Clipped to the block: canvas text is drawn from a baseline and happily
+            //  spills past the rectangle, which left the room line of a one hour course
+            //  sliced in half along the bottom edge.
+            context.save();
+            context.beginPath();
+            context.rect(x, y, blockWidth, blockHeight);
+            context.clip();
+
             context.fillStyle = 'white';
             context.font = 'bold 14px Roboto, Helvetica, Arial, sans-serif';
-            context.fillText(fit(context, block.name, blockWidth - 16), x + 8, y + 18);
+            context.fillText(fit(context, block.name, blockWidth - 16), x + 8, y + 17);
 
             context.font = '12px Roboto, Helvetica, Arial, sans-serif';
-            context.fillText(fit(context, hours(block.start, block.duration), blockWidth - 16), x + 8, y + 36);
+            context.fillText(fit(context, hours(block.start, block.duration), blockWidth - 16), x + 8, y + 33);
 
-            if (block.place && blockHeight > 54) {
-                context.fillText(fit(context, block.place, blockWidth - 16), x + 8, y + 54);
+            //  Three lines need 55px of the 58px a one hour block gives; anything shorter
+            //  drops the room rather than showing half of it.
+            if (block.place && blockHeight >= 56) {
+                context.fillText(fit(context, block.place, blockWidth - 16), x + 8, y + 49);
             }
+
+            context.restore();
         });
 
         //  Footer with the credit totals, when the panel has them
