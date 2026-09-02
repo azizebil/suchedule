@@ -1727,8 +1727,9 @@ const shareLink = (() => {
     if (localStorage.getItem('visited-before') === null) {
         localStorage.setItem('visited-before', 'yes');
 
+        //  One greeting rather than two stacked windows: #notify-about already covers what
+        //  the app is, where the data is kept and where the credit figures come from.
         $('#notify-about').show();
-        $('#notify-cookies').show();
     }
 })();
 
@@ -2268,7 +2269,6 @@ const normalizeSearchParam = (query) => {
     });
 
     $(document).on('click', '#about-button', () => $('#notify-about').fadeIn(500));
-    $(document).on('click', '#about-button', () => $('#notify-cookies').fadeIn(500));
 })();
 
 (setWeekdayFilterEvents = () => {
