@@ -397,10 +397,25 @@ const scenarios = (() => {
 
     const getActiveName = () => getName(getActiveIndex());
 
-    const crnCount = index => {
+    //  Counted by course, not by crn: a lecture and its recitation are two crns but one
+    //  course, and "Plan B has 2 courses in it" for a single ENS 202 reads as a mistake.
+    const courseCount = index => {
         const crns = plans[index].crns;
 
-        return crns === '' ? 0 : crns.split(',').length;
+        if (crns === '') {
+            return 0;
+        }
+
+        const codes = {};
+
+        crns.split(',').forEach(crn => {
+            const section = sectionEntry(crn);
+
+            //  A crn the current term no longer carries still counts as something.
+            codes[section.getElement().length > 0 ? section.getCourseCodeWithoutSpace() : crn] = 1;
+        });
+
+        return Object.keys(codes).length;
     };
 
     const saveActive = crns => {
@@ -430,7 +445,7 @@ const scenarios = (() => {
     //  limit, so the button says so instead of silently doing nothing.
     const updateDuplicateState = () => {
         const full = plans.length >= MAX;
-        const empty = crnCount(getActiveIndex()) === 0;
+        const empty = courseCount(getActiveIndex()) === 0;
 
         $('#scenario-duplicate')
             .toggleClass('disabled', full || empty)
@@ -591,7 +606,7 @@ const scenarios = (() => {
             return;
         }
 
-        if (crnCount(index) === 0) {
+        if (courseCount(index) === 0) {
             close(index);
 
             return;
@@ -600,7 +615,7 @@ const scenarios = (() => {
         pendingClose = index;
 
         $('#notify-close-plan .notification-content p').text(
-            `${getName(index)} has ${crnCount(index)} course${crnCount(index) === 1 ? '' : 's'} in it.` +
+            `${getName(index)} has ${courseCount(index)} course${courseCount(index) === 1 ? '' : 's'} in it.` +
             ` Closing it cannot be undone.`
         );
 
@@ -688,7 +703,7 @@ const scenarios = (() => {
     };
 
     return {
-        MAX, count, nextName, getActiveIndex, getName, getActiveName, crnCount, saveActive,
+        MAX, count, nextName, getActiveIndex, getName, getActiveName, courseCount, saveActive,
         clearScheduleDom, renderTabs, switchTo, add, duplicate, requestClose, confirmClose, rename,
         replaceActive, move,
         migrateLegacy, loadForActiveTerm
@@ -1958,7 +1973,7 @@ const shareLink = (() => {
 
         const index = scenarios.getActiveIndex();
 
-        return {isNew: false, name: scenarios.getName(index), courses: scenarios.crnCount(index)};
+        return {isNew: false, name: scenarios.getName(index), courses: scenarios.courseCount(index)};
     };
 
     const notify = (id, text) => {
