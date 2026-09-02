@@ -278,6 +278,9 @@ const templateGenerator = (() => {
 
     const makeScenarioAddButton = () => `<div id="scenario-add" title="New plan">+</div>`;
 
+    const makeScenarioDuplicateButton = () =>
+        `<div id="scenario-duplicate" class="icon-clipboard" title="Duplicate this plan"></div>`;
+
     const makeTermOption = (term, label) => `<option value="${term}">${label}</option>`;
 
     const makeTermGroup = (label, options) => `<optgroup label="${label}">${options}</optgroup>`;
@@ -320,6 +323,7 @@ const templateGenerator = (() => {
         makeCreditMetric,
         makeScenarioTab,
         makeScenarioAddButton,
+        makeScenarioDuplicateButton,
         makeTermOption,
         makeTermGroup
     };
@@ -403,6 +407,7 @@ const scenarios = (() => {
         plans[getActiveIndex()].crns = crns;
 
         write();
+        updateDuplicateState();
     };
 
     //  Only called when the plan list itself changes. Switching tabs merely moves the
@@ -416,13 +421,29 @@ const scenarios = (() => {
             .html(
                 plans.map((plan, index) =>
                     templateGenerator.makeScenarioTab(plan, index, index === activeIndex, index === enteringIndex))
-                    .join('') + (plans.length < MAX ? templateGenerator.makeScenarioAddButton() : '')
+                    .join('') + templateGenerator.makeScenarioDuplicateButton()
+                    + (plans.length < MAX ? templateGenerator.makeScenarioAddButton() : '')
             );
+    };
+
+    //  Duplicating an empty plan produces nothing, and there is no room for a copy at the
+    //  limit, so the button says so instead of silently doing nothing.
+    const updateDuplicateState = () => {
+        const full = plans.length >= MAX;
+        const empty = crnCount(getActiveIndex()) === 0;
+
+        $('#scenario-duplicate')
+            .toggleClass('disabled', full || empty)
+            .attr('title', full ? `You already have ${MAX} plans`
+                : empty ? 'This plan has no courses to copy'
+                : `Duplicate ${getActiveName()}`);
     };
 
     const markActiveTab = () => {
         $('.scenario-tab').removeClass('active')
             .filter(`[data-scenario="${getActiveIndex()}"]`).addClass('active');
+
+        updateDuplicateState();
     };
 
     //  Deliberately does not save: switching tabs resets the table before loading the
@@ -483,6 +504,43 @@ const scenarios = (() => {
 
     //  The tab plays its exit animation before the list actually changes, so the
     //  remaining tabs only reflow once, after it is gone.
+    //  The copy's name has to differ from the source or two identically labelled tabs sit
+    //  side by side with no way to tell them apart.
+    const copyName = name => {
+        const base = `${name} copy`.slice(0, 24);
+
+        if (!plans.some(plan => plan.name === base)) {
+            return base;
+        }
+
+        for (let suffix = 2; suffix <= MAX; suffix++) {
+            const candidate = `${base} ${suffix}`.slice(0, 24);
+
+            if (!plans.some(plan => plan.name === candidate)) {
+                return candidate;
+            }
+        }
+
+        return nextName();
+    };
+
+    //  Copies the stored crns rather than rebuilding anything: switchTo already resets the
+    //  table, loads the target, re-runs the conflict filter and refreshes the totals.
+    const duplicate = () => {
+        const source = plans[getActiveIndex()];
+
+        if (plans.length >= MAX || source.crns === '') {
+            return;
+        }
+
+        plans.push({name: copyName(source.name), crns: source.crns});
+
+        write();
+        renderTabs(plans.length - 1);
+
+        switchTo(plans.length - 1);
+    };
+
     const close = index => {
         const $tab = $(`.scenario-tab[data-scenario="${index}"]`);
 
@@ -631,7 +689,8 @@ const scenarios = (() => {
 
     return {
         MAX, count, nextName, getActiveIndex, getName, getActiveName, crnCount, saveActive,
-        clearScheduleDom, renderTabs, switchTo, add, requestClose, confirmClose, rename, replaceActive, move,
+        clearScheduleDom, renderTabs, switchTo, add, duplicate, requestClose, confirmClose, rename,
+        replaceActive, move,
         migrateLegacy, loadForActiveTerm
     };
 })();
@@ -2179,6 +2238,12 @@ const normalizeSearchParam = (query) => {
     });
 
     $(document).on('click', '#scenario-add', () => scenarios.add());
+
+    $(document).on('click', '#scenario-duplicate', event => {
+        if (!$(event.currentTarget).hasClass('disabled')) {
+            scenarios.duplicate();
+        }
+    });
 
     $(document).on('click', '.scenario-tab-close', event => {
         event.stopPropagation();
