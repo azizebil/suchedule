@@ -47,10 +47,10 @@ const terms = (() => {
 
     //  Only drops what no longer matches terms.json. The old blanket "delete anything
     //  containing saved-schedule" wiped the other term's schedule on every data update.
+    //  Saved plans survive a data update entirely now - see planGuard.
     const clearOutdated = () => {
         const validCaches = list.map(entry => cacheKey(entry.term));
         const knownTerms = list.map(entry => entry.term);
-        const outdated = [];
 
         Object.keys(localStorage).forEach(key => {
             if (key.indexOf('course-data-') === 0) {
@@ -61,8 +61,11 @@ const terms = (() => {
 
                 const term = key.split('-')[2];
 
-                if (knownTerms.indexOf(term) > -1 && outdated.indexOf(term) === -1) {
-                    outdated.push(term);
+                //  Handed over before the removal, not after: this cache is the only
+                //  record of what the term looked like before the update, and the plans
+                //  are about to be compared against it.
+                if (knownTerms.indexOf(term) > -1) {
+                    planGuard.keepSnapshot(term, localStorage.getItem(key));
                 }
 
                 localStorage.removeItem(key);
@@ -70,21 +73,14 @@ const terms = (() => {
                 return;
             }
 
+            //  A term that rotated out of terms.json is the one case where plans are
+            //  still dropped: there is no data file left for them to refer to.
             if (key.indexOf('saved-schedules-') === 0 || key.indexOf('active-scenario-') === 0) {
                 if (knownTerms.indexOf(key.slice(key.lastIndexOf('-') + 1)) === -1) {
                     localStorage.removeItem(key);
                 }
             }
         });
-
-        //  A term whose data changed keeps its tabs but loses their crns, which may no
-        //  longer exist. Terms that did not change are left alone.
-        outdated.forEach(term => {
-            localStorage.removeItem(`saved-schedules-${term}`);
-            localStorage.removeItem(`active-scenario-${term}`);
-        });
-
-        return outdated;
     };
 
     //  Nine flat rows are hard to scan, so they are grouped by academic year with the
@@ -174,6 +170,164 @@ const courseData = (() => {
     };
 
     return {load};
+})();
+
+//  A data update used to throw away every plan saved for the term, on the grounds that a
+//  crn might no longer exist. Almost none of them ever do, so almost all of that was loss
+//  for nothing. Plans are kept now: what genuinely vanished is pruned, and what merely
+//  moved is reported. Based on mustafacani/suchedule@cc33855.
+const planGuard = (() => {
+    //  The term as it was before the update, held for this page load only. It is read out
+    //  of the stale cache at the moment that cache is dropped, so there is no second
+    //  chance to collect it - and with the cache capped at two terms, often no first one.
+    const previous = {};
+
+    //  Each crn reduced to what a user would notice changing. instructors and places are
+    //  indices into per-file tables that every scrape rebuilds from scratch, so comparing
+    //  the indices reports changes that never happened; they are resolved to text first.
+    const indexSections = ({courses, instructors, places}) => {
+        const sections = {};
+
+        courses.forEach(course => course.classes.forEach(_class => _class.sections.forEach(section => {
+            sections[section.crn] = {
+                name: `${course.code.replace(' ', '')}${_class.type} - ${section.group}`,
+                instructor: instructors[section.instructors],
+                hours: section.schedule
+                    .map(({day, start, duration}) => `${day}|${start}|${duration}`).sort().join(),
+                places: section.schedule.map(({place}) => places[place]).sort().join()
+            };
+        })));
+
+        return sections;
+    };
+
+    const keepSnapshot = (term, raw) => {
+        try {
+            previous[term] = indexSections(JSON.parse(raw));
+        } catch (error) {
+            //  A half-written cache is no worse than no cache at all: the plans are still
+            //  kept, their changes just go unreported.
+        }
+    };
+
+    const describe = (before, after) => {
+        const changes = [];
+
+        if (before.hours !== after.hours) {
+            changes.push('new hours');
+        }
+
+        if (before.places !== after.places) {
+            changes.push('a new classroom');
+        }
+
+        if (before.instructor !== after.instructor) {
+            changes.push('a new instructor');
+        }
+
+        return changes;
+    };
+
+    const join = parts => parts.length < 2
+        ? parts.join('')
+        : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+
+    //  Runs on every term switch, not only on an update: it is idempotent, and a plan
+    //  carrying a crn the term does not have is worth fixing whenever it is noticed.
+    const reconcile = (term, data) => {
+        const key = `saved-schedules-${term}`;
+        const before = previous[term];
+        const report = [];
+
+        //  One shot. Switching away and back must not replay the same report.
+        delete previous[term];
+
+        let plans;
+
+        try {
+            plans = JSON.parse(localStorage.getItem(key));
+        } catch (error) {
+            return report;
+        }
+
+        if (!Array.isArray(plans)) {
+            return report;
+        }
+
+        const after = indexSections(data);
+        let pruned = false;
+
+        plans.forEach(plan => {
+            if (plan === null || typeof plan !== 'object' || typeof plan.crns !== 'string'
+                || plan.crns === '') {
+                return;
+            }
+
+            const notes = [];
+            const kept = plan.crns.split(',').filter(crn => {
+                const current = after[crn];
+
+                if (current === undefined) {
+                    //  Named from the old data where there is any, from the bare crn
+                    //  where there is not - better than telling nobody which course went.
+                    notes.push(`${before && before[crn] ? before[crn].name : crn}`
+                        + ' is no longer offered, and was removed');
+
+                    return false;
+                }
+
+                if (before !== undefined && before[crn] !== undefined) {
+                    const changes = describe(before[crn], current);
+
+                    if (changes.length > 0) {
+                        notes.push(`${current.name} has ${join(changes)}`);
+                    }
+                }
+
+                return true;
+            });
+
+            if (kept.length !== plan.crns.split(',').length) {
+                plan.crns = kept.join(',');
+                pruned = true;
+            }
+
+            if (notes.length > 0) {
+                report.push({name: String(plan.name || 'A plan'), notes});
+            }
+        });
+
+        //  Written back so the next visit does not report the same removal again: the crn
+        //  is out of the plan by then, so there is nothing left to notice.
+        if (pruned) {
+            localStorage.setItem(key, JSON.stringify(plans));
+        }
+
+        return report;
+    };
+
+    //  Grouped by plan name - without it someone with five plans is told a section moved
+    //  and left to find out which of their plans it was in.
+    const announce = report => {
+        if (report.length === 0) {
+            return;
+        }
+
+        const body = $('#notify-data-updated .plan-changes').empty();
+
+        report.forEach(entry => {
+            const notes = $('<ul></ul>');
+
+            entry.notes.forEach(note => notes.append($('<li></li>').text(note)));
+
+            //  .text(), not interpolation: a plan name is whatever the user typed.
+            body.append($('<p class="plan-name"></p>').text(entry.name), notes);
+        });
+
+        $('#notify-data-updated').fadeIn(500);
+    };
+
+    return {keepSnapshot, reconcile, announce};
 })();
 
 const templateGenerator = (() => {
@@ -2331,6 +2485,10 @@ const switchTerm = term => {
     $('#course-list').empty().addClass('loading');
 
     return courseData.load(term).then(data => {
+        //  Before loadForActiveTerm: reconciling rewrites the stored plan list, and
+        //  scenarios must not have read the pre-pruning version of it.
+        const changes = planGuard.reconcile(term, data);
+
         courseEntry.populate(data.courses, data.instructors, data.places, term);
 
         scenarios.loadForActiveTerm();
@@ -2342,6 +2500,9 @@ const switchTerm = term => {
         creditFilter.recalculate();
 
         applyAllFilters();
+
+        //  Last, so the schedule is already drawn behind the notification.
+        planGuard.announce(changes);
     });
 };
 
@@ -2683,16 +2844,9 @@ const normalizeSearchParam = (query) => {
 
         scenarios.migrateLegacy(terms.getCurrent());
 
-        const outdated = terms.clearOutdated();
-
-        if (outdated.length > 0) {
-            $('#notify-data-updated .notification-content p').text(
-                `The courses for ${outdated.map(terms.getLabel).join(' and ')} changed, so the plans saved` +
-                ` for ${outdated.length === 1 ? 'that term' : 'those terms'} were cleared.`
-            );
-
-            $('#notify-data-updated').fadeIn(500);
-        }
+        //  Drops stale caches and hands their contents to planGuard, which switchTerm
+        //  then compares the saved plans against.
+        terms.clearOutdated();
 
         return switchTerm(terms.getActive());
     }).then(() => shareLink.offerImport()).fail(() => {
