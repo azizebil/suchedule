@@ -107,7 +107,10 @@ class SUcheduleCourseScraper:
         """
         Get course information from a course tag.
         """
-        # Catch course name, crn code, course code and section code
+        #  Catch course name, crn code, course code and section code. The title reads
+        #  "<name> - <crn> - <code> - <group>", and only the last three fields are fixed:
+        #  the name is everything before them and may carry dashes of its own, as in
+        #  "Nano-Optics" or "Ottoman History, 1300-1600".
         title = course.find("a").text.split("-")
 
         # Catch course sections
@@ -163,7 +166,7 @@ class SUcheduleCourseScraper:
 
         # Add values to dictionary
         course_information = {
-            "name": title[0],
+            "name": "-".join(title[:-3]).strip() if len(title) > 3 else title[0].strip(),
             "crn": title[-3],
             "code": title[-2],
             "cr": credits_value,
@@ -421,13 +424,10 @@ class SUcheduleCourseScraper:
         if "Discussion" in name:
             name = name.replace("Discussion", "")
 
-        if name[-1] == " " or name[-1] == ",":
-            name = name[:-1]
-
-        if name[0] == " ":
-            name = name[1:]
-
-        return name
+        #  Removing a word out of the middle can leave a stray space or comma behind,
+        #  and the old single-character checks raised IndexError on a name that ended up
+        #  empty. Stripping repeatedly cannot.
+        return name.strip().rstrip(",").strip()
 
     @staticmethod
     def set_course_code(code: str) -> str:

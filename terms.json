@@ -2,19 +2,19 @@
   "terms": [
     {
       "term": "202601",
-      "dataVersion": 84
+      "dataVersion": 85
     },
     {
       "term": "202503",
-      "dataVersion": 3
+      "dataVersion": 4
     },
     {
       "term": "202502",
-      "dataVersion": 1
+      "dataVersion": 2
     },
     {
       "term": "202501",
-      "dataVersion": 1
+      "dataVersion": 2
     },
     {
       "term": "202403",
@@ -22,19 +22,19 @@
     },
     {
       "term": "202402",
-      "dataVersion": 1
+      "dataVersion": 2
     },
     {
       "term": "202401",
-      "dataVersion": 1
+      "dataVersion": 2
     },
     {
       "term": "202303",
-      "dataVersion": 1
+      "dataVersion": 2
     },
     {
       "term": "202302",
-      "dataVersion": 1
+      "dataVersion": 2
     }
   ]
 }

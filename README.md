@@ -16,6 +16,17 @@ This project allows Sabancı University students to create their schedule with a
   clicking, close with `×`, reorder by dragging.
 - **Shareable links** — the Share button copies a `#term=...&crns=...` link. Opening it offers to load that
   schedule into a new plan, so nothing you already built is overwritten.
+- **Plans survive a data update** — when the course data changes, your plans are kept rather than cleared.
+  A section that is genuinely gone is dropped from the plan and named; one that merely moved is reported,
+  grouped by which plan it is in.
+
+## Credits
+
+Beyond the upstream project, two ideas in this fork come from
+[mustafacani/suchedule](https://github.com/mustafacani/suchedule), another MIT-licensed fork of the same
+original: keeping saved plans across a data update by diffing the old and new course data
+([`cc33855`](https://github.com/mustafacani/suchedule/commit/cc33855)), and the scraper fix for course names
+containing a dash ([`abfb907`](https://github.com/mustafacani/suchedule/commit/abfb907)).
 
 ## Build
 
