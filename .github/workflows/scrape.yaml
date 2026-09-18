@@ -21,6 +21,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+          # requirements.txt is not at the repo root, so the path is given rather than
+          # left to the action's default glob.
+          cache: 'pip'
+          cache-dependency-path: scraper/requirements.txt
           
       - name: Install dependencies
         run: |
