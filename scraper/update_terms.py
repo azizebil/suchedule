@@ -7,6 +7,11 @@ shell embedded in YAML cannot.
 
     python scraper/update_terms.py <term> <scraped-json>
 
+Also answers two questions the workflow used to work out in shell:
+
+    python scraper/update_terms.py --current     the newest term on record
+    python scraper/update_terms.py --next        the term that would follow it
+
 Prints a shell-friendly summary to stdout:
 
     changed=true|false
@@ -24,6 +29,25 @@ import sys
 MAX_TERMS = 9
 TERMS_FILE = "terms.json"
 DATA_DIR = "data"
+
+
+def next_term(term):
+    """
+    The term code that follows this one.
+
+    Summer terms are real here - 202303, 202403 and 202503 all carry courses - so the cycle
+    runs Fall -> Spring -> Summer -> Fall of the next year. A fork that skips summers can
+    go straight from Spring to the next Fall; we cannot.
+    """
+    year, season = term[:4], term[4:]
+
+    if season == "01":
+        return f"{year}02"
+
+    if season == "02":
+        return f"{year}03"
+
+    return f"{int(year) + 1}01"
 
 
 def data_file(term, version):
@@ -62,8 +86,22 @@ def same_content(left, right):
 
 
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] in ("--current", "--next"):
+        terms = read_terms()
+
+        if not terms:
+            print("terms.json carries no terms", file=sys.stderr)
+            return 1
+
+        newest = max(entry["term"] for entry in terms)
+
+        print(newest if sys.argv[1] == "--current" else next_term(newest))
+
+        return 0
+
     if len(sys.argv) != 3:
-        print("usage: update_terms.py <term> <scraped-json>", file=sys.stderr)
+        print("usage: update_terms.py <term> <scraped-json> | --current | --next",
+              file=sys.stderr)
         return 1
 
     term, scraped = sys.argv[1], sys.argv[2]

@@ -76,6 +76,26 @@ class SUcheduleCourseScraper:
             str
         """
         course_informations: List[Dict] = []
+
+        # Parses html and catches course title, crn code, course code and section code
+        courses: List = self.fetch_section_rows(codes)
+
+        # Get course information
+        for course in courses:
+            course_information = self.get_course_information(course)
+
+            if course_information["section"]:
+                course_informations.append(course_information)
+            else:
+                print(f"Course {course_information['name']} has no section.")
+
+        # Edit course information for json file
+        return self.set_course_informations(course_informations)
+
+    def fetch_section_rows(self, codes: List[str]) -> List:
+        """
+        The term's section listing, as the <th class="ddlabel"> rows that head each one.
+        """
         payload = {'term_in': self.term, 'sel_subj': codes, 'sel_day': 'dummy', 'sel_schd': 'dummy',
                    'sel_insm': 'dummy', 'sel_camp': 'dummy', 'sel_levl': 'dummy', 'sel_sess': 'dummy',
                    'sel_instr': 'dummy', 'sel_ptrm': 'dummy', 'sel_attr': 'dummy', 'sel_crse': '', 'sel_title': '',
@@ -89,19 +109,34 @@ class SUcheduleCourseScraper:
 
         # Parses html and catches course title, crn code, course code and section code
         source = BeautifulSoup(data.content, 'html.parser')
-        courses: List = source.find_all("th", attrs={"class": "ddlabel"})
 
-        # Get course information
-        for course in courses:
-            course_information = self.get_course_information(course)
+        return source.find_all("th", attrs={"class": "ddlabel"})
 
-            if course_information["section"]:
-                course_informations.append(course_information)
-            else:
-                print(f"Course {course_information['name']} has no section.")
+    def has_courses(self) -> bool:
+        """
+        Whether bannerweb carries this term yet, which is to say whether it lists a single
+        section for it. The workflow asks this instead of working the answer out from the
+        calendar: the calendar says "it is August, so it is autumn" on a date when the
+        registrar may not have published anything yet, and says it again the day after.
 
-        # Edit course information for json file
-        return self.set_course_informations(course_informations)
+        Deliberately stops at the listing. Building the full course data would answer the
+        same yes-or-no at the cost of a complete scrape - some 700 catalog requests against
+        the university's server, every day, mostly to be told "no".
+        """
+        try:
+            codes = self.get_course_codes()
+
+            #  Nothing but the dummy: bannerweb offered no subjects for this term at all.
+            if len(codes) < 2:
+                return False
+
+            return len(self.fetch_section_rows(codes)) > 0
+        except requests.RequestException as error:
+            #  A failed request is not evidence that a term exists. Answering no keeps the
+            #  workflow on the term it already has, which is the harmless way to be wrong.
+            print(f"term check failed: {error}", file=sys.stderr)
+
+            return False
 
     def get_course_information(self, course: BeautifulSoup) -> Dict:
         """
@@ -565,6 +600,10 @@ class SUcheduleCourseScraper:
 
 
 if __name__ == '__main__':
+    #  Kept separate from a scrape on purpose - the workflow asks this every single day.
+    if len(sys.argv) > 2 and sys.argv[1] == '--check-term':
+        sys.exit(0 if SUcheduleCourseScraper(term=int(sys.argv[2])).has_courses() else 1)
+
     term = int(sys.argv[1])
     scraper = SUcheduleCourseScraper(term=term)
     scraper.run()

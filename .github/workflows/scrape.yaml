@@ -27,37 +27,49 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r scraper/requirements.txt
           
-      - name: Calculate current term and run update
+      - name: Pick the terms and run the update
         id: check
+        # The default shell is `bash -e`, without pipefail, so a python step that failed
+        # into a `| tee` would be reported as the exit status of tee - that is, success.
+        # plan_terms.py is the one that matters: a masked failure there leaves the term
+        # list empty and the whole run passes green having scraped nothing.
+        shell: bash
         run: |
-          # Calculate current term
-          echo "::group::Calculating academic term"
-          CURRENT_TERM=$(date +%Y%m | awk '{y=int(substr($1,1,4)); m=int(substr($1,5,2)); printf("%d%02d", m>=8?y:y-1, m<=4?2:(m>=8?1:3))}')
-          echo "Current term: $CURRENT_TERM"
-          echo "::endgroup::"
-          
           echo "::group::Current terms"
           cat terms.json
           echo "::endgroup::"
 
-          echo "::group::Running scraper"
-          echo "Running scraper/scrape.py with term $CURRENT_TERM"
-          # Run scraping script with term argument
-          python scraper/scrape.py $CURRENT_TERM
+          echo "::group::Asking bannerweb which terms exist"
+          # This used to be calendar arithmetic in awk, which got both boundaries wrong:
+          # it called it autumn on a date the registrar had published nothing for, and it
+          # went on ignoring the following spring for months after bannerweb had it.
+          python scraper/plan_terms.py | tee /tmp/terms.txt
           echo "::endgroup::"
 
-          echo "::group::Validating the scrape"
-          # A broken parser does not raise, it just writes nulls. Publishing that would
-          # bump the data version and wipe every user's saved plans for this term, so the
-          # file has to clear the thresholds before it is allowed near a commit.
-          python scraper/validate.py data.min.json
-          echo "::endgroup::"
+          CHANGED=""
 
-          echo "::group::Folding the scrape into terms.json"
-          # update_terms.py bumps only this term's version, removes only this term's old
-          # data file, and drops the oldest term once the list grows past nine.
-          python scraper/update_terms.py "$CURRENT_TERM" data.min.json | tee /tmp/update_terms.out
-          echo "::endgroup::"
+          while read -r TERM; do
+            echo "::group::Scraping $TERM"
+            python scraper/scrape.py "$TERM"
+            echo "::endgroup::"
+
+            echo "::group::Validating $TERM"
+            # A broken parser does not raise, it just writes nulls. Publishing that would
+            # bump the data version for nothing, so the file has to clear the thresholds
+            # before it is allowed near a commit.
+            python scraper/validate.py data.min.json
+            echo "::endgroup::"
+
+            echo "::group::Folding $TERM into terms.json"
+            # update_terms.py bumps only this term's version, removes only this term's old
+            # data file, and drops the oldest term once the list grows past nine.
+            python scraper/update_terms.py "$TERM" data.min.json | tee /tmp/update_terms.out
+            echo "::endgroup::"
+
+            if grep -q '^changed=true$' /tmp/update_terms.out; then
+              CHANGED="$CHANGED $TERM v$(grep '^version=' /tmp/update_terms.out | cut -d= -f2)"
+            fi
+          done < /tmp/terms.txt
 
           echo "::group::Rebuilding the offerings index"
           # Which terms each course was opened in, compiled here so the page never has to
@@ -66,29 +78,27 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Result"
-          if grep -q '^changed=true$' /tmp/update_terms.out; then
+          if [ -n "$CHANGED" ]; then
             echo "changes=true" >> $GITHUB_OUTPUT
-            echo "version=$(grep '^version=' /tmp/update_terms.out | cut -d= -f2)" >> $GITHUB_OUTPUT
-            echo "term=$CURRENT_TERM" >> $GITHUB_OUTPUT
+            echo "summary=${CHANGED# }" >> $GITHUB_OUTPUT
             cat terms.json
           else
             echo "No changes detected in scraped data"
             echo "changes=false" >> $GITHUB_OUTPUT
           fi
           echo "::endgroup::"
-          
+
       - name: Create Pull Request
         if: steps.check.outputs.changes == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: update ${{ steps.check.outputs.term }} data to v${{ steps.check.outputs.version }}"
-          title: "Data Update: ${{ steps.check.outputs.term }} v${{ steps.check.outputs.version }}"
+          commit-message: "chore: update data for ${{ steps.check.outputs.summary }}"
+          title: "Data Update: ${{ steps.check.outputs.summary }}"
           body: |
             Automated data update
 
-            - Term: ${{ steps.check.outputs.term }}
-            - Updated data file to version ${{ steps.check.outputs.version }}
+            - Terms updated: ${{ steps.check.outputs.summary }}
             - Last updated: ${{ github.event.repository.updated_at }}
             
             This PR was automatically generated by GitHub Actions.
