@@ -42,6 +42,9 @@ def calendar_term(today=None):
     August onward is that year's autumn, through April is the previous year's spring, and
     what is left over - May, June, July - is its summer. The year in a term code is the
     start of the academic year, which is why the later months carry year - 1.
+
+    js/suchedule.js applies the same rule (terms.calendarTerm) to pick the term the page
+    opens on; change one and the other has to follow.
     """
     today = today or datetime.date.today()
     year, month = today.year, today.month

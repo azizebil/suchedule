@@ -26,20 +26,53 @@ const terms = (() => {
 
     const getList = () => list;
 
-    //  terms.json keeps the newest term first.
-    const getCurrent = () => list[0].term;
-
     const has = term => list.some(entry => entry.term === term);
+
+    //  The term the calendar says is in session: August onward is that year's autumn,
+    //  through April the previous year's spring, May to July its summer. This is the same
+    //  rule scraper/plan_terms.py uses to decide what to refresh, and the two have to stay
+    //  in step.
+    const calendarTerm = (today = new Date()) => {
+        const year = today.getFullYear();
+        const month = today.getMonth() + 1;
+
+        if (month >= 8) {
+            return `${year}01`;
+        }
+
+        return month <= 4 ? `${year - 1}02` : `${year - 1}03`;
+    };
+
+    //  The default term. Not simply the newest any more: bannerweb publishes a term months
+    //  ahead - in September it already carries the spring - and defaulting to the newest
+    //  would land everyone in a term that has not started. So it is the term in session,
+    //  or failing that the latest one that has already begun (early August, before the
+    //  autumn is out). terms.json keeps the newest first and term codes compare as plain
+    //  strings, so that is the first entry not after the calendar's term.
+    const getCurrent = () => {
+        const inSession = calendarTerm();
+        const started = list.find(entry => entry.term <= inSession);
+
+        return (started || list[0]).term;
+    };
 
     const getVersion = term => list.find(entry => entry.term === term).dataVersion;
 
+    //  A chosen term is remembered together with the default it was chosen against, and
+    //  lapses once the default moves on. Every page load writes active-term, so without
+    //  this it records "the term you last saw" rather than a choice, and each January
+    //  everyone would open the site to last semester.
     const getActive = () => {
         const stored = localStorage.getItem('active-term');
+        const chosenAgainst = localStorage.getItem('active-term-default');
 
-        return has(stored) ? stored : getCurrent();
+        return has(stored) && chosenAgainst === getCurrent() ? stored : getCurrent();
     };
 
-    const setActive = term => localStorage.setItem('active-term', term);
+    const setActive = term => {
+        localStorage.setItem('active-term', term);
+        localStorage.setItem('active-term-default', getCurrent());
+    };
 
     const dataFile = term => `data/data-${term}-v${getVersion(term)}.min.json`;
 
@@ -101,12 +134,14 @@ const terms = (() => {
         )).join('')).val(getActive());
     };
 
+    //  Either side of the default now: the newest term is usually ahead of it.
     const updateNotice = () => {
         const active = getActive();
+        const current = getCurrent();
 
         $('#term-notice')
-            .toggle(active !== getCurrent())
-            .text(`Viewing a past term (${getLabel(active)})`);
+            .toggle(active !== current)
+            .text(`Viewing ${active < current ? 'a past' : 'an upcoming'} term (${getLabel(active)})`);
     };
 
     return {
