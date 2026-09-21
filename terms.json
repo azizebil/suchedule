@@ -1,8 +1,12 @@
 {
   "terms": [
     {
+      "term": "202602",
+      "dataVersion": 1
+    },
+    {
       "term": "202601",
-      "dataVersion": 85
+      "dataVersion": 86
     },
     {
       "term": "202503",
@@ -30,10 +34,6 @@
     },
     {
       "term": "202303",
-      "dataVersion": 2
-    },
-    {
-      "term": "202302",
       "dataVersion": 2
     }
   ]
