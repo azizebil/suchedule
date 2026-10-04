@@ -1,22 +1,126 @@
 from typing import List, Dict
 
 import requests
+import datetime
 import json
+import os
 import sys
 import re
 import time
+import zlib
 
 from bs4 import BeautifulSoup
 
 
 class SUcheduleCourseScraper:
+    #  Names a file the catalog cache is read from and written back to. Unset means no
+    #  file and no sharing, so a plain `scrape.py <term>` behaves exactly as before.
+    CATALOG_CACHE_ENV = "SUCHEDULE_CATALOG_CACHE"
+
+    #  How long a cached catalog entry is trusted. The catalog barely changes, but barely
+    #  is not never, so a fourteenth of it is dropped each day and fetched again - some
+    #  forty requests rather than five hundred, and nothing goes more than a fortnight
+    #  stale. Keyed off the code so the slice is the same for every term in a run.
+    CATALOG_REFRESH_DAYS = 14
+
     def __init__(self, term: int):
         self.term = term
         self.instructors = []
         self.places = []
         self.catalog_cache = {}
+        #  What the cache file held when it was read, kept so that saving can never lose an
+        #  entry this run happened not to look at.
+        self.catalog_baseline = {}
         #  492 catalog fetches over one connection instead of 492 handshakes.
         self.session = requests.Session()
+
+    def request_with_retry(self, method: str, url: str, attempts: int = 4,
+                           timeout: int = 60, delay: int = 5, **kwargs):
+        """
+        A scrape that runs for minutes will meet a stalled request eventually, and
+        bannerweb slows to a crawl while one is in progress - measured, repeatedly, right
+        after a full term had been pulled. Only the catalog used to retry, so a single read
+        timeout on the subject list or the section listing took the whole run down with it.
+
+        Re-raises the last error once the attempts are spent.
+        """
+        for attempt in range(1, attempts + 1):
+            try:
+                return self.session.request(method, url, timeout=timeout, **kwargs)
+            except requests.RequestException as error:
+                if attempt == attempts:
+                    raise
+
+                print(f"{url} failed ({attempt}/{attempts}): {error}; retrying in {delay}s",
+                      file=sys.stderr)
+
+                time.sleep(delay)
+                delay *= 2
+
+    def is_stale(self, code: str, day_of_year: int) -> bool:
+        """
+        Whether this code falls in today's slice of the cache. crc32 rather than hash():
+        hash() is salted per process, so the same code would land in a different slice on
+        every run and the rotation would be no rotation at all.
+        """
+        return zlib.crc32(code.encode()) % self.CATALOG_REFRESH_DAYS == \
+            day_of_year % self.CATALOG_REFRESH_DAYS
+
+    def load_catalog_cache(self) -> None:
+        """
+        A catalog entry belongs to a course code, not to a term, and hardly ever changes,
+        so there is no reason to ask bannerweb for five hundred of them every day. This is
+        not a nicety: by October 2026 the server had slowed to seven seconds a catalog
+        page under our own load, a term took an hour instead of five minutes, and whatever
+        was scraped second could not get a response at all.
+
+        Entries are kept in a file the workflow commits, so a run starts knowing almost
+        everything and fetches only what is new or due a refresh.
+        """
+        path = os.environ.get(self.CATALOG_CACHE_ENV)
+
+        if not path or not os.path.exists(path):
+            return
+
+        try:
+            with open(path, encoding="utf-8") as handle:
+                stored = json.load(handle)
+        except (OSError, ValueError) as error:
+            #  A cache is an optimisation. A damaged one is not worth failing a run over.
+            print(f"Ignoring catalog cache {path}: {error}", file=sys.stderr)
+
+            return
+
+        day_of_year = datetime.date.today().timetuple().tm_yday
+
+        self.catalog_baseline = {code: tuple(value) for code, value in stored.items()}
+        self.catalog_cache = {code: value for code, value in self.catalog_baseline.items()
+                              if not self.is_stale(code, day_of_year)}
+
+        print(f"Catalog cache: {len(self.catalog_cache)} entries carried over, "
+              f"{len(stored) - len(self.catalog_cache)} due a refresh.")
+
+    def save_catalog_cache(self) -> None:
+        path = os.environ.get(self.CATALOG_CACHE_ENV)
+
+        if not path:
+            return
+
+        #  Merged over what was on disk, never written in place of it. Today's refresh
+        #  slice is dropped at load and only comes back as the scrape reaches those
+        #  courses, so a run that fails halfway - or one term of a two term run - would
+        #  otherwise save a cache smaller than the one it started from, and the next run
+        #  would have to fetch the difference all over again.
+        merged = {**self.catalog_baseline, **self.catalog_cache}
+
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                #  Sorted: the cache is committed, and a dict in scrape order would show a
+                #  reshuffled diff every day even when not one credit had changed.
+                json.dump(merged, handle, sort_keys=True, indent=0)
+                handle.write("\n")
+        except OSError as error:
+            print(f"Could not write catalog cache {path}: {error}", file=sys.stderr)
 
     @staticmethod
     def to_number(text):
@@ -37,9 +141,18 @@ class SUcheduleCourseScraper:
         """
         Run required flow for getting course schedule and saving to a .json file
         """
+        self.load_catalog_cache()
+
         course_codes = self.get_course_codes()
         print("Course codes are fetched.")
-        course_datas = self.get_courses_data(codes=course_codes)
+
+        try:
+            course_datas = self.get_courses_data(codes=course_codes)
+        finally:
+            #  Written even when the scrape falls over: what it did fetch spares the next
+            #  term, or the next attempt, from asking for the same pages again.
+            self.save_catalog_cache()
+
         print("Course data is fetched.")
         self.write_json_file(courses=course_datas,places=self.places,instructors=self.instructors)
         print("Json file is created.")
@@ -54,8 +167,8 @@ class SUcheduleCourseScraper:
         headers = {'Content-type': 'application/x-www-form-urlencoded'}
 
         # Sends request to bannerweb
-        data = self.session.post(f"https://suis.sabanciuniv.edu/prod/bwckgens.p_proc_term_date",
-                             data=payload, headers=headers, timeout=60)
+        data = self.request_with_retry("POST", "https://suis.sabanciuniv.edu/prod/bwckgens.p_proc_term_date",
+                                       data=payload, headers=headers)
 
         # Parses html and catches course codes
         source = BeautifulSoup(data.content, 'html.parser')
@@ -103,9 +216,13 @@ class SUcheduleCourseScraper:
                    'end_hh': '0', 'end_mi': '0', 'end_ap': 'a'}
         headers = {'Content-type': 'application/x-www-form-urlencoded'}
 
-        # Sends request to bannerweb
-        data = self.session.post(f"https://suis.sabanciuniv.edu/prod/bwckschd.p_get_crse_unsec",
-                             data=payload, headers=headers, timeout=60)
+        #  Five minutes, not the default sixty seconds. Measured in October 2026: this
+        #  endpoint sits on the request for 59 seconds before the first byte of the autumn
+        #  listing and 72 before the spring's, then delivers three or four megabytes in
+        #  under a second. A sixty second timeout put the line straight through the middle
+        #  of that, which is why one term went through every day and the other never did.
+        data = self.request_with_retry("POST", "https://suis.sabanciuniv.edu/prod/bwckschd.p_get_crse_unsec",
+                                       data=payload, headers=headers, timeout=300)
 
         # Parses html and catches course title, crn code, course code and section code
         source = BeautifulSoup(data.content, 'html.parser')
@@ -232,14 +349,12 @@ class SUcheduleCourseScraper:
         Returns (ects, engineering, basic_science); each is a number, or None when
         the page carries no attribute block at all - special topic courses have none.
         """
-        response = None
+        try:
+            response = self.request_with_retry("GET", url, attempts=2, timeout=15, delay=2)
+        except requests.RequestException as error:
+            print(f"Catalog request failed for {url}: {error}")
 
-        for attempt in range(2):
-            try:
-                response = self.session.get(url, timeout=15)
-                break
-            except requests.RequestException as error:
-                print(f"Catalog request failed ({attempt + 1}/2) for {url}: {error}")
+            response = None
 
         if response is None or response.status_code != 200:
             print(f"Skipping catalog {url}: {response.status_code if response else 'no response'}")

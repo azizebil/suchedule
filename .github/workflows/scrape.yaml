@@ -15,10 +15,10 @@ jobs:
       checks: write
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13'
           # requirements.txt is not at the repo root, so the path is given rather than
@@ -51,17 +51,40 @@ jobs:
           echo "::endgroup::"
 
           CHANGED=""
+          FAILED=""
+
+          # Committed, not temporary. A catalog entry belongs to a course code rather
+          # than to a term and hardly ever changes, so carrying it between runs turns
+          # some five hundred requests a term into the handful that are new or due a
+          # refresh. The server had slowed to a crawl under the old volume.
+          export SUCHEDULE_CATALOG_CACHE=scraper/catalog-cache.json
 
           while read -r TERM; do
+            # Never leave the previous term's file behind for this one to fold in.
+            rm -f data.min.json
+
             echo "::group::Scraping $TERM"
-            python scraper/scrape.py "$TERM"
+            # One term failing must not throw away another term that worked. The run is
+            # still failed at the end, by the last step, after the good data is committed.
+            if ! python scraper/scrape.py "$TERM"; then
+              echo "::warning::Scraping $TERM failed"
+              FAILED="$FAILED $TERM"
+              echo "::endgroup::"
+              continue
+            fi
             echo "::endgroup::"
 
             echo "::group::Validating $TERM"
             # A broken parser does not raise, it just writes nulls. Publishing that would
             # bump the data version for nothing, so the file has to clear the thresholds
             # before it is allowed near a commit.
-            python scraper/validate.py data.min.json
+            if ! python scraper/validate.py data.min.json; then
+              echo "::warning::$TERM did not clear the validation thresholds"
+              FAILED="$FAILED $TERM"
+              rm -f data.min.json
+              echo "::endgroup::"
+              continue
+            fi
             echo "::endgroup::"
 
             echo "::group::Folding $TERM into terms.json"
@@ -90,6 +113,7 @@ jobs:
             echo "No changes detected in scraped data"
             echo "changes=false" >> $GITHUB_OUTPUT
           fi
+          echo "failed=${FAILED# }" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
       - name: Create Pull Request
@@ -109,3 +133,11 @@ jobs:
           branch: auto-update-data
           base: master
           delete-branch: true
+
+      # Last, so a term that could not be scraped still turns the run red - and the email
+      # with it - without costing us the term that did scrape.
+      - name: Report the terms that could not be scraped
+        if: steps.check.outputs.failed != ''
+        run: |
+          echo "::error::Could not scrape:${{ steps.check.outputs.failed }}"
+          exit 1
